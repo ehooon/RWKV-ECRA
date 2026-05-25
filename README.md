@@ -1,5 +1,9 @@
 # RWKV-ECRA
 
+语言：中文 | [English](README.en.md)
+
+示例输出：[TileLang 深度技术分析报告](data/output/TileLang_Deep_Analysis.md)
+
 RWKV-ECRA 是一个端云协同的长文档分析 Agent：
 - 通过端云协同的方法，估算每小时可以分析千万 token 级的文本，同时可以节省 80% 以上的 token
 
@@ -151,4 +155,3 @@ data/checkpoints/
 - 在最终报告前加入 cross-file check，专门检查跨文件关联是否充分
 - 引入 PaddleOCR-VL 或其他以视觉语言OCR模型来处理“任意文件”
 - 在节点上增加更多协作角色，保持主流程稳定的同时，逐节点优化
-
