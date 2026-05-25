@@ -1,0 +1,11 @@
+# 1. 核心规则：让 Git 开启智能转换（仓库中存 LF，检出时根据系统决定）
+* text=auto
+
+# 2. 特殊例外（避坑指南）：
+# 即使在 Windows 上，Shell 脚本也必须强行保持 LF，否则在 Git Bash 或 WSL 里会报错！
+*.sh text eol=lf
+
+# 二进制文件严禁转换换行符，防止损坏
+*.png binary
+*.jpg binary
+*.jpeg binary

@@ -13,3 +13,4 @@
 
 # 4. （可选）如果你希望 .gitignore 文件本身也能被提交并同步到仓库，请保留下面这行：
 !.gitignore
+!.gitattributes
