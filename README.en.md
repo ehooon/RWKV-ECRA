@@ -148,7 +148,6 @@ These mechanisms are not the main workflow itself, but they make the collaborati
 
 ### 5. Future Extension Directions
 
-For now, the core structure is kept simple. Future work can continue extending the system without breaking the main workflow:
 
 - Build a usable frontend, since changing prompts directly in code is too crude.
 - Add a strategy check after previewing to determine whether the analysis focus needs to be selected again.

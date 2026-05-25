@@ -1,48 +1,51 @@
 def build_orchestrator_system_prompt() -> str:
-    return """【系统指令】
-当前任务流程：理解意图 -> 盘点资产 -> 试读画像 -> 制定策略下发 MapReduce -> 大模型融会贯通亲自撰写总报告并落盘。
-【要求与红线】：
-1. 试读和抽取细节的工作已经委托给小模型，你会收到它们返回的核心素材。
-2. 严禁跳过试读和委托阶段直接盲猜文件内容。
-3. 在最后出报告阶段，你必须将获取到的所有片段融会贯通，亲自撰写最终的 Markdown 长文报告，拒绝“拼接式”行文。最终报告绝不要包含类似“所有内容均来自模型”的免责废话。"""
+    return """【系统任务与目标】
+当前任务是响应用户需求，合理调用给定工具对本地文档进行深度分析，并最终基于提取到的素材生成高质量的综合研报。
+
+【标准作业程序 (SOP)】
+系统需根据历史执行状态，自主推演并决定当前应执行的步骤。标准的逻辑链路如下：
+1. 意图拆解与资产盘点：调用 `search_local_file` 获取目标文件列表。
+2. 全局抽样画像：对探测到的所有文件，逐一调用 `preview_document_content` 试读探测。
+3. 深度逻辑与事实提取：为所有文件调用 `delegate_to_small_models` 下发 MapReduce 任务，获取详尽的摘要素材。
+4. 终盘生成与落盘：所有文件的核心素材收集完毕后，调用 `export_report_to_md` 撰写总报告并保存。
+
+【执行约束与绝对红线】：
+1. 基于状态推演：必须严格根据“历史回溯状态”评估当前进度，并决定下一步需调用的工具。如单次无法处理所有文件，可分步调用。
+2. 杜绝捏造：严禁在未调用工具获取文件内容的情况下，凭空猜测或编造文件数据。
+3. 纯净输出格式：在终盘调用 `export_report_to_md` 时，必须直接输出纯粹的 Markdown 报告正文。绝对禁止在内容首尾添加“以下是为您生成的报告”、“报告生成时间”、“免责声明”、“结语”等任何对话性废话或无意义元数据。"""
 
 def build_orchestrator_user_prompt(user_query: str, execution_history: list) -> str:
     prompt = f"【用户原始需求】\n{user_query}\n\n"
     
     if not execution_history:
-        prompt += """【当前阶段：意图拆解与资源探测】
-分析用户意图，并调用 `search_local_file` 获取文件列表。"""
+        prompt += "【当前执行状态】\n任务刚刚启动。请分析意图，并调用检索工具获取工作区资产情况，开始你的自主规划。"
         return prompt
 
     prompt += "【当前已执行的动作状态(历史回溯)】\n"
-    history_str = ""
     for idx, log in enumerate(execution_history):
-        history_str += f"- 步骤 {idx+1}: {log}\n"
-    prompt += history_str + "\n"
+        prompt += f"- 步骤 {idx+1}: {log}\n"
+    
+    prompt += """
+【下一步规划指引】
+请仔细阅读上方的“历史回溯”，并进行推演：
+1. 有哪些文件还没有完成 preview (画像抽样)？
+2. 有哪些文件还没有被 delegate (下发小模型深度提炼)？
+3. 是否所有文件的精要素材都已经搜集完毕，可以出最终报告了？
 
-    if "search_local_file" in history_str and "preview_document_content" not in history_str:
-        prompt += "【当前阶段：抽样与画像构建】\n必须对上方找到的**每一个**文件调用 `preview_document_content` 工具。"
-
-    elif "preview_document_content" in history_str and "delegate_to_small_models" not in history_str:
-        prompt += """【当前阶段：全局策略分析与委托下发】
-必须为**每个**文件调用 `delegate_to_small_models` 下发 MapReduce 任务。
-工具会为你返回该文件的 1500 字精要素材，请你吸收并记忆这些素材，作为你最后写总报告的基础。"""
-
-    elif "delegate_to_small_models" in history_str and "export_report_to_md" not in history_str:
-        # 🚨 重点修改这里：增加极其严格的格式和内容过滤约束
-        prompt += """【当前阶段：全局关联分析与最终大盘输出】
-所有文件的提炼素材已经全部收集完毕。
-请调用 `export_report_to_md` 工具。由于底层不再自动拼接，你需要在 `full_report_content` 参数中，亲自撰写一份完整、排版优美的 Markdown 格式最终研报。
-
-请包含：
-1. 宏观跨文件分析：深度比对各文件的共性或差异点。
-2. 核心观点梳理：基于历史步骤中你获取到的各文件精要素材，用你严谨连贯的语言重新组织并深度总结。
-
-🚨【绝对红线（严禁违反）】：
-1. 报告必须纯粹是学术/技术干货！直接从正文的大标题（如 `# 核心报告`）开始写。
-2. 绝对禁止在报告开头或结尾添加任何“报告生成时间”、“作者信息”、“前言”、“免责声明”、“结语”等无意义的边角料或元数据！
-3. 杜绝所有类似“根据您的要求，我为您生成了以下报告”的废话，只输出报告本身。"""
-    else:
-        prompt += "【当前阶段：评估与完结】\n若已写盘完成，请直接回复：“报告已生成，任务圆满完成。”"
-
+请自主决定调用相应的工具。如果所有步骤已经完成且文件已经由你亲自导出，请不要调用工具，直接回复文本告知任务圆满完成。
+"""
     return prompt
+
+def build_isolated_check_prompt(func_name: str, result_str: str) -> str:
+    return f"""【任务说明】
+你是一个独立的无责审核模块。以下内容是由另一个辅助模型/底层系统在执行 `{func_name}` 后刚刚生成的返回结果。
+该数据不由你负责产生，你只需客观、冷酷地判断其是否“基本可用”。
+
+【评估标准】
+请检查该结果是否存在以下致命缺陷：严重乱码、无限复读死循环、完全偏离主题、或者明显的底层崩溃报错信息。
+1. 如果存在上述致命问题，请回复：FAIL: [简要说明具体原因]
+2. 如果内容基本正常（允许存在被强行截断的情况，允许内容不够完美），请直接且仅回复：PASS
+
+【另一个辅助模型/系统返回的数据】：
+{result_str}
+"""
