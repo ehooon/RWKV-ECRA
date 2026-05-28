@@ -13,7 +13,7 @@ class SLMClient:
         payload = {
             "contents": contents,
             "max_tokens": 1500,       # 🚨 限制最大输出，防止失控
-            "temperature": 0.3,       # 🚨 降低随机性，保证提炼准确性
+            "temperature": 0.6,       # 🚨 降低随机性，保证提炼准确性
             "top_k": 50,
             "top_p": 0.85,
             "alpha_presence": 0.5,    # 🚨 鼓励输出新内容

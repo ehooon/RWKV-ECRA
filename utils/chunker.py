@@ -1,10 +1,10 @@
 import re
-import tiktoken
+from utils.rwkv_tokenizer import RWKVTokenizer
 
-_tokenizer = tiktoken.get_encoding("cl100k_base")
+_tokenizer = RWKVTokenizer("rwkv_vocab_v20230424.txt")
 
 def get_token_count(text: str) -> int:
-    return len(_tokenizer.encode(text, disallowed_special=()))
+    return len(_tokenizer.encode(text))
 
 def semantic_chunk_text(text: str, max_tokens: int = 800, overlap_ratio: float = 0.1) -> list[str]:
     overlap_tokens = int(max_tokens * overlap_ratio)
@@ -65,7 +65,7 @@ def semantic_chunk_text(text: str, max_tokens: int = 800, overlap_ratio: float =
 
 def _extract_token_overlap(text: str, target_tokens: int) -> str:
     if target_tokens <= 0: return ""
-    tokens = _tokenizer.encode(text, disallowed_special=())
+    tokens = _tokenizer.encode(text)
     if len(tokens) <= target_tokens: return text
     tail_text = _tokenizer.decode(tokens[-target_tokens:])
     split_match = re.search(r'[。！？.!?\n]', tail_text)
@@ -77,7 +77,7 @@ def _is_english_ending(text: str) -> bool:
     return re.match(r'[a-zA-Z0-9.,!?;:]', text[-1]) is not None
 
 def _safe_fallback_chunk(text: str, max_tokens: int) -> list[str]:
-    tokens = _tokenizer.encode(text, disallowed_special=())
+    tokens = _tokenizer.encode(text)
     pieces = []
     for i in range(0, len(tokens), max_tokens):
         pieces.append(_tokenizer.decode(tokens[i : i + max_tokens]))

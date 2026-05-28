@@ -1,51 +1,34 @@
-def build_orchestrator_system_prompt() -> str:
-    return """【系统任务与目标】
-当前任务是响应用户需求，合理调用给定工具对本地文档进行深度分析，并最终基于提取到的素材生成高质量的综合研报。
+import json
 
-【标准作业程序 (SOP)】
-系统需根据历史执行状态，自主推演并决定当前应执行的步骤。标准的逻辑链路如下：
-1. 意图拆解与资产盘点：调用 `search_local_file` 获取目标文件列表。
-2. 全局抽样画像：对探测到的所有文件，逐一调用 `preview_document_content` 试读探测。
-3. 深度逻辑与事实提取：为所有文件调用 `delegate_to_small_models` 下发 MapReduce 任务，获取详尽的摘要素材。
-4. 终盘生成与落盘：所有文件的核心素材收集完毕后，调用 `export_report_to_md` 撰写总报告并保存。
+def build_orchestrator_system_prompt() -> str:
+    """构建 Agent 大脑的核心系统指令"""
+    return """你是具备高度自主性的长文本分析 Agent。当前运行在一个安全的沙盒环境中。
+你只能通过 `file_ids`（如 ['DOC_1']）对已知文件进行操作。不可捏造ID。
+
+【工具箱与能力】
+你可以自由组合以下工具来完成用户的目标：
+- `search_local_file`: 根据关键词检索沙盒文件，获取目标文件ID（当文件过多或用户点名某类文件时使用）。
+- `preview_document_content`: 试读文件片段，了解大概内容。
+- `delegate_to_small_models`: 呼叫本地小模型进行深度且详尽的全文提炼。
+- `query_checkpoint_via_slm`: 在已有的记忆或文档中进行针对性的“捞针”问答。
+- `batch_process_individual_reports`: 基于提炼结果，生成单篇标准化分类报告。
+- `generate_final_aggregate_reports`: 当有多篇报告时，进行跨域聚合分析。
 
 【执行约束与绝对红线】：
-1. 基于状态推演：必须严格根据“历史回溯状态”评估当前进度，并决定下一步需调用的工具。如单次无法处理所有文件，可分步调用。
-2. 杜绝捏造：严禁在未调用工具获取文件内容的情况下，凭空猜测或编造文件数据。
-3. 纯净输出格式：在终盘调用 `export_report_to_md` 时，必须直接输出纯粹的 Markdown 报告正文。绝对禁止在内容首尾添加“以下是为您生成的报告”、“报告生成时间”、“免责声明”、“结语”等任何对话性废话或无意义元数据。"""
+1. 杜绝捏造：严禁凭空猜测数据，必须依赖工具返回的客观事实。
+2. 对症下药：如果用户只要求分析“某个/某类”特定文件，你必须先使用 search_local_file 找到它，然后单独处理，绝不要全量处理所有文件！
+3. 动态规划：无需僵化死板。根据用户的问题灵活决定是“全文提炼”还是直接“试读捞针”。当满足用户原始指令目标后，立即调用 `finish_task`。"""
 
-def build_orchestrator_user_prompt(user_query: str, execution_history: list) -> str:
-    prompt = f"【用户原始需求】\n{user_query}\n\n"
-    
-    if not execution_history:
-        prompt += "【当前执行状态】\n任务刚刚启动。请分析意图，并调用检索工具获取工作区资产情况，开始你的自主规划。"
-        return prompt
+def build_orchestrator_user_prompt(context_text: str) -> str:
+    return f"请仔细阅读以下环境快照，并严格按照用户的指令做出诊断与推演，随后选择相应的工具执行。\n\n{context_text}"
 
-    prompt += "【当前已执行的动作状态(历史回溯)】\n"
-    for idx, log in enumerate(execution_history):
-        prompt += f"- 步骤 {idx+1}: {log}\n"
-    
-    prompt += """
-【下一步规划指引】
-请仔细阅读上方的“历史回溯”，并进行推演：
-1. 有哪些文件还没有完成 preview (画像抽样)？
-2. 有哪些文件还没有被 delegate (下发小模型深度提炼)？
-3. 是否所有文件的精要素材都已经搜集完毕，可以出最终报告了？
-
-请自主决定调用相应的工具。如果所有步骤已经完成且文件已经由你亲自导出，请不要调用工具，直接回复文本告知任务圆满完成。
-"""
-    return prompt
-
-def build_isolated_check_prompt(func_name: str, result_str: str) -> str:
-    return f"""【任务说明】
-你是一个独立的无责审核模块。以下内容是由另一个辅助模型/底层系统在执行 `{func_name}` 后刚刚生成的返回结果。
-该数据不由你负责产生，你只需客观、冷酷地判断其是否“基本可用”。
-
-【评估标准】
-请检查该结果是否存在以下致命缺陷：严重乱码、无限复读死循环、完全偏离主题、或者明显的底层崩溃报错信息。
-1. 如果存在上述致命问题，请回复：FAIL: [简要说明具体原因]
-2. 如果内容基本正常（允许存在被强行截断的情况，允许内容不够完美），请直接且仅回复：PASS
-
-【另一个辅助模型/系统返回的数据】：
-{result_str}
-"""
+def build_diagnostic_prompt(query: str, action: str, args: dict, last_error: str) -> tuple[str, str]:
+    sys_prompt = "你是一个独立的系统故障诊断模块。任务是阅读原始问题和当前的局部报错，判断 Agent 卡在了哪里，并用一两句话给出破局建议。"
+    content = (
+        f"【用户原始意图】: {query}\n"
+        f"【陷入死循环的底层动作】: {action}\n"
+        f"【触发该错误的参数】: {json.dumps(args, ensure_ascii=False)}\n"
+        f"【连续系统报错信息】: {last_error}\n\n"
+        f"请评估死循环原因，直接指示 Agent 下一步怎么做（例如：直接跳过进入下一步生成归类报告等）。"
+    )
+    return sys_prompt, content
