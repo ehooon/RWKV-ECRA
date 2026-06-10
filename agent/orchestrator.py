@@ -1,6 +1,7 @@
 # RWKV-ECRA/agent/orchestrator.py
 import os
 import json
+import traceback
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, Set
@@ -23,6 +24,7 @@ class AgentState:
     task_id: str = ""
     task_output_dir: str = ""  
     user_query: str = ""
+    refined_query: str = ""  
     id_to_path: Dict[str, str] = field(default_factory=dict)
     path_to_id: Dict[str, str] = field(default_factory=dict)
     working_memory: Dict[str, str] = field(default_factory=dict) 
@@ -36,12 +38,15 @@ class AgentState:
     final_result: str = ""
 
     def _mount_global_env(self) -> str:
-        current_time_str = datetime.now().strftime("%Y年%m月%d日 %H:%M:%S")
-        return "\n".join([
+        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        active_query = self.refined_query if self.refined_query else self.user_query
+        
+        env_lines = [
             "【挂载模块: 任务环境】",
             f"- 系统时间: {current_time_str}", 
-            f"- 初始指令: {self.user_query}"
-        ])
+            f"- 当前执行目标: {active_query}"
+        ]
+        return "\n".join(env_lines)
 
     def _mount_memory_catalog(self) -> str:
         filtered_mem = {}
@@ -64,7 +69,7 @@ class AgentState:
         lines = ["【挂载模块: 情报目录大纲】"]
         
         lines.append(f"[系统状态] 当前可用知识库缓存已挂载（体积估算: {memory_total_tokens} Tokens）。")
-        lines.append("【工作指引】: 请继续检查并收集其他缺漏情报；如果所有核心事实均已齐备，请立即调用 generate_final_aggregate_reports 进入最终大一统聚合（系统底座已搭载自动超限折叠与二次重压引擎，请放心调用无需顾虑 Token）。")
+        lines.append("【工作指引】: 请继续检查并收集其他缺漏情报；如果所有核心事实均已齐备，请立即调用 generate_final_aggregate_reports 进入最终聚合。")
             
         lines.append("\n以下是已获取的可用情报，请据此决定下一步：")
         lines.extend(memory_details)
@@ -131,7 +136,31 @@ class Orchestrator:
         with open(trace_file, "w", encoding="utf-8") as f:
             f.write(f"# Deep Research 执行追踪日志\n\n**启动时间**: {session_id}\n**用户指令**: {user_query}\n\n---\n\n")
 
-        update_task_progress(self.state.task_id, "🔧 正在初始化环境，搜索本地目录中的文件...")
+        # UI 中文映射字典
+        PHASE_MAP = {
+            "DISCOVERY": "🔍 探测与发现",
+            "EXTRACTION": "📑 深度提取",
+            "SYNTHESIS": "🧠 聚合适成"
+        }
+        ACTION_MAP = {
+            "search_local_file": "检索沙盒文件",
+            "preview_document_content": "试读文档摘要",
+            "delegate_to_small_models": "调度小模型提炼全文",
+            "query_checkpoint_via_slm": "执行记忆区细节捞针",
+            "batch_process_individual_reports": "归档单篇独立报告",
+            "compress_working_memory": "执行工作记忆压缩",
+            "generate_final_aggregate_reports": "排版聚合最终研报",
+            "execute_web_search": "执行互联网检索",
+            "finish_task": "任务逻辑闭环退出",
+            "none": "思考下一步方向"
+        }
+
+        progress_log = []
+        def push_progress(msg: str):
+            progress_log.append(msg)
+            update_task_progress(self.state.task_id, "\n".join(progress_log))
+
+        push_progress("🚀 正在初始化环境，构建工作区内存与检索本地文件...")
 
         try:
             initial_files_json = ToolRegistry.execute("search_local_file", {"keyword": ""}, {})
@@ -141,8 +170,10 @@ class Orchestrator:
                 self.state.id_to_path[fid] = p
                 self.state.path_to_id[p] = fid
             self.state.last_feedback = f"系统就绪，目录中发现 {len(initial_files)} 份可用文件。"
+            push_progress(f"✅ 环境就绪：感知到 {len(initial_files)} 份文件。\n")
         except Exception:
             self.state.last_feedback = "目录为空。"
+            push_progress(f"✅ 环境就绪：本地沙盒目录为空。\n")
             
         step_count = 0
         MAX_STEPS = 40 
@@ -152,23 +183,21 @@ class Orchestrator:
                 self.state.last_feedback = "任务已被用户手动终止。"
                 self.state.is_finished = True
                 self.state.final_result = "执行中止: 任务已被手动停止。"
+                push_progress("\n⚠️ 任务被手动中止。")
                 return self.state.final_result
                 
             step_count += 1
             context_text = self.state.to_markdown_context()
 
             try:
-                # 🔴 播报推演阶段
-                update_task_progress(self.state.task_id, f"🧠 正在思考下一步行动... (当前执行步数: {step_count})")
+                push_progress(f"🤔 [思考步数 {step_count}] 正在分析环境状态与任务缺口...")
 
                 analysis = self.analyzer.analyze_intent_and_phase(user_query, context_text)
                 phase = analysis.get("next_phase", "DISCOVERY")
                 missing_info = analysis.get("missing_information", "无")
                 
-                # 🔴 播报意图方向
-                progress_msg = f"🏃 步数 {step_count} | 阶段: {phase}\n🎯 方向: {missing_info}\n🛠️ 动作: 准备进行规划推演..."
-                update_task_progress(self.state.task_id, progress_msg)
-                
+                if "refined_query" in analysis and analysis["refined_query"]:
+                    self.state.refined_query = analysis["refined_query"]
                 if "entity_audit" in analysis:
                     self.state.entity_audit.update(analysis["entity_audit"])
                     
@@ -179,13 +208,12 @@ class Orchestrator:
                 print(f"\n" + "="*50)
                 print(f"🕵️ [Deep Research 步数 {step_count}]")
                 if self.state.abandoned_file_ids:
-                    print(f"🗑️ 系统已物理屏蔽资源: {list(self.state.abandoned_file_ids)}")
+                    print(f"🗑️ 物理屏蔽资源: {list(self.state.abandoned_file_ids)}")
                 print(f"🔍 实体审计 (Entity Audit):")
                 for ent, desc in analysis.get('entity_audit', {}).items():
                     print(f"  - {ent}: {desc}")
-                print(f"📊 任务拆解: {analysis.get('task_decomposition', [])}")
-                print(f"🧠 进度反思: {analysis.get('reflection', '无')}")
-                print(f"🎯 下步动作: {missing_info}")
+                print(f"💧 脱水目标: {self.state.refined_query}")
+                print(f"🎯 缺口提取: {missing_info}")
                 print(f"📍 当前阶段: {phase}")
                 print("="*50)
                 
@@ -193,19 +221,19 @@ class Orchestrator:
                 action, args = plan["action"], plan["args"]
                 print(f"[工具调用]: -> {action}()")
 
-                # 🔴 播报当前正执行的工具
-                progress_msg = f"🏃 步数 {step_count} | 阶段: {phase}\n🎯 方向: {missing_info}\n🛠️ 动作: 正在调用工具 {action}()"
-                update_task_progress(self.state.task_id, progress_msg)
+                friendly_phase = PHASE_MAP.get(phase, phase)
+                friendly_action = ACTION_MAP.get(action, action)
+                
+                push_progress(f"  ├─ 阶段: {friendly_phase}\n  ├─ 缺口: {missing_info}\n  └─ 动作: 调度工具 [{friendly_action}]")
                 
                 self.tracker.track("Routing", input_data=phase, output_data=plan)
 
                 step_log = f"## 🏃 步骤 {step_count} (阶段: {phase})\n\n"
                 step_log += "### 1. 状态分析 (Analyzer)\n"
+                step_log += f"- **脱水目标**: {self.state.refined_query}\n"
                 step_log += f"- **实体审计**: \n```json\n{json.dumps(analysis.get('entity_audit', {}), ensure_ascii=False, indent=2)}\n```\n"
-                step_log += f"- **任务拆解**: {analysis.get('task_decomposition', [])}\n"
-                step_log += f"- **进度反思**: {analysis.get('reflection', '无')}\n"
-                step_log += f"- **下步动作**: {missing_info}\n\n"
-                step_log += "### 2. 工具调用规划 (Planner)\n"
+                step_log += f"- **缺口提取**: {missing_info}\n\n"
+                step_log += "### 2. 工具路由 (Planner)\n"
                 step_log += f"- **动作**: `{action}`\n"
                 step_log += f"- **参数**: \n```json\n{json.dumps(args, ensure_ascii=False, indent=2)}\n```\n\n"
                 
@@ -227,24 +255,43 @@ class Orchestrator:
                     args["file_paths"] = [self.state.id_to_path.get(fid) for fid in args["file_ids"] if fid in self.state.id_to_path]
 
                 result = ToolRegistry.execute(action, args=args, context=env_context)
+                self.state.last_feedback = f"上一步 [{action}] 执行结果:\n{result}"
 
-                # 🔴 播报完成情况
-                update_task_progress(self.state.task_id, f"🏃 步数 {step_count} | 阶段: {phase}\n✅ 工具 {action} 执行完毕，整理结果进入下一轮...")
+                push_progress(f"✅ [执行完成] 工具返回结果，整理进入下一轮...\n")
 
                 with open(trace_file, "a", encoding="utf-8") as f:
                     f.write(f"### 3. 工具执行结果\n\n```text\n{result}\n```\n\n---\n\n")
 
+                # ==========================================
+                # 检查结束标识，如果未成功排版则强制兜底生成报告并跳出循环
+                # ==========================================
                 if self.state.is_finished:
-                    # 🔴 修复：将校验关键字更改为报告生成器必然返回的 "排版研报"
                     if "排版研报" not in str(self.state.final_result) and not is_task_stopped(self.state.task_id):
-                        print("\n[系统生命周期兜底] 检测到任务即将结束，但由于工具路由跑偏，最终聚合报告尚未在本地落盘！")
-                        print("正在强制调起高级报告汇聚引擎...")
-                        update_task_progress(self.state.task_id, "🔧 正在生成最终分析研报...")
+                        print("\n[系统兜底] 检测到任务结束，强制调起聚合引擎...")
+                        push_progress("🔧 检测到任务闭环，正在生成最终聚合研报...")
                         from workflows.report_flow import generate_final_aggregate_reports
                         generate_final_aggregate_reports(working_memory=self.state.working_memory, tracker=self.tracker, agent_state=self.state)
                     
-                    update_task_progress(self.state.task_id, "🎉 任务已圆满完成！")
-                    return self.state.final_result
+                    break # 任务完成，跳出 while 循环
 
-                print(f"[工具返回]: {result}")
-                print("-" * 40)
+            # ==========================================
+            # 捕获并处理大模型格式幻觉或工具解析错误
+            # ==========================================
+            except Exception as e:
+                error_msg = f"❌ 执行步骤 {step_count} 时发生异常: {str(e)}"
+                print(f"\n{error_msg}")
+                traceback.print_exc()
+                push_progress(error_msg)
+                
+                self.state.last_feedback = f"上一步执行出现严重异常: {str(e)}。请反思调用参数是否符合要求，或尝试调用其他工具。"
+
+        # ==========================================
+        # 兜底：如果步数耗尽还未完成任务，则强制聚合退出，防止挂起
+        # ==========================================
+        if not self.state.is_finished and not is_task_stopped(self.state.task_id):
+            print("\n[系统兜底] 达到最大探索步数，强制调起聚合引擎...")
+            push_progress("⚠️ 达到最大思考步数限制，正在强制生成最终聚合研报...")
+            from workflows.report_flow import generate_final_aggregate_reports
+            generate_final_aggregate_reports(working_memory=self.state.working_memory, tracker=self.tracker, agent_state=self.state)
+            
+        return self.state.final_result
