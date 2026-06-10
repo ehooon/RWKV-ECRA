@@ -1,4 +1,5 @@
 import os
+import sys
 from agent.orchestrator import Orchestrator
 from config import DATA_PIPELINE, API_KEYS
 
@@ -9,19 +10,25 @@ def setup_env():
 
 if __name__ == "__main__":
     setup_env()
+    print("[系统] Agent 引擎已启动")
     
-    ckpt_dir = DATA_PIPELINE.get("checkpoint_directory")
-    if os.path.exists(ckpt_dir) and len(os.listdir(ckpt_dir)) > 0:
-        print(f"🔄 [断点检测] 发现上次未完成的中间进度 ({len(os.listdir(ckpt_dir))} 个文件)，将启用断点续传机制...")
+    if len(sys.argv) > 1:
+        query = " ".join(sys.argv[1:])
     else:
-        print("🚀 [断点检测] 启动全新任务。")
-
+        print("\n" + "="*60)
+        query = input("请输入文本分析指令 (例如: '提取目录中所有财务文件的核心数据' 或 '生成总览报告')\n> ")
+        print("="*60 + "\n")
+        
+    if not query.strip():
+        print("指令为空，退出程序。")
+        sys.exit(0)
+        
+    print(f"[系统] 接收指令: {query}\n开始执行分析任务...\n")
+    
     agent = Orchestrator()
-    print("Agent 初始化完成。开始执行指令...")
-    
-    query = "帮我深度分析输入目录下的所有文章，请根据文章长短自己把握总结详细程度，并在最终报告中给出这些文件的跨文件关联分析。"
-    print(f"用户：{query}\n")
-    
-    response = agent.run(query)
-    print("\n" + "="*20 + " 最终输出结果 " + "="*20)
-    print(response)
+    try:
+        response = agent.run(query)
+        print("\n" + "="*20 + " 任务完成 " + "="*20)
+        print(response)
+    except Exception as e:
+        print(f"\n[执行异常] 运行中止: {e}")

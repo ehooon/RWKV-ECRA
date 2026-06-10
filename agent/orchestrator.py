@@ -1,152 +1,268 @@
+# RWKV-ECRA/agent/orchestrator.py
+import os
 import json
-import re
-from clients.llm_client import LLMClient
-from schemas.tools_definition import TOOL_SCHEMAS_POOL
-from tools.registry import TOOL_REGISTRY
+from datetime import datetime
+from dataclasses import dataclass, field
+from typing import Dict, Set
+from agent.analyzer import Analyzer
+from agent.planner import Planner
 from utils.tracker import EventTracker
-from config import TRACKING 
-from prompts.llm_prompts import (
-    build_orchestrator_system_prompt, 
-    build_orchestrator_user_prompt,
-    build_isolated_check_prompt
-)
+from config import TRACKING, DATA_PIPELINE
+from tools.registry import ToolRegistry
+from utils.chunker import get_token_count
+from utils.task_manager import is_task_stopped, update_task_progress
 
-def robust_json_parse(json_str: str) -> dict:
-    """🛠️ 高强度 JSON 容错解析器：应对模型生成参数时的各种幺蛾子"""
-    try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
-        pass
+import tools.static_ops 
+import tools.web_search
+import workflows.map_reduce_flow
+import workflows.memory_query_flow
+import workflows.report_flow
+
+@dataclass
+class AgentState:
+    task_id: str = ""
+    task_output_dir: str = ""  
+    user_query: str = ""
+    refined_query: str = ""  
+    id_to_path: Dict[str, str] = field(default_factory=dict)
+    path_to_id: Dict[str, str] = field(default_factory=dict)
+    working_memory: Dict[str, str] = field(default_factory=dict) 
+    memory_catalog: Dict[str, str] = field(default_factory=dict) 
+    last_feedback: str = "" 
     
-    # 剔除 Markdown 格式干扰
-    clean_str = re.sub(r'^```(?:json)?|```$', '', json_str.strip(), flags=re.MULTILINE).strip()
-    try:
-        return json.loads(clean_str)
-    except json.JSONDecodeError:
-        pass
-        
-    # 修复常见的尾部逗号错误
-    clean_str = re.sub(r",\s*}", "}", clean_str)
-    clean_str = re.sub(r",\s*\]", "]", clean_str)
-    try:
-        return json.loads(clean_str)
-    except json.JSONDecodeError:
-        pass
+    entity_audit: Dict[str, str] = field(default_factory=dict)
+    abandoned_file_ids: Set[str] = field(default_factory=set)
+    
+    is_finished: bool = False
+    final_result: str = ""
 
-    # 暴力提取最外层的 {}
-    match = re.search(r'\{.*\}', clean_str, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
+    def _mount_global_env(self) -> str:
+        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        active_query = self.refined_query if self.refined_query else self.user_query
+        
+        env_lines = [
+            "【挂载模块: 任务环境】",
+            f"- 系统时间: {current_time_str}", 
+            f"- 当前执行目标: {active_query}"
+        ]
+        return "\n".join(env_lines)
+
+    def _mount_memory_catalog(self) -> str:
+        filtered_mem = {}
+        for k, v in self.working_memory.items():
+            if any(fid in k for fid in self.abandoned_file_ids):
+                continue
+            if not k.startswith("__") and not k.startswith("AbsPath_") and not k.startswith("Path_"):
+                filtered_mem[k] = v
+
+        if not filtered_mem:
+            return "【挂载模块: 情报目录大纲】\n*(记忆区当前为空)*"
             
-    raise ValueError(f"无法解析的 JSON 字符串 (已尝试多重退避修复): {json_str[:100]}...")
+        memory_total_tokens = sum(get_token_count(str(v)) for v in filtered_mem.values())
+        memory_details = []
+        
+        for k in filtered_mem.keys():
+            desc = self.memory_catalog.get(k, "已存储有效结构化数据")
+            memory_details.append(f"- `{k}`: [{desc}]")
+                
+        lines = ["【挂载模块: 情报目录大纲】"]
+        
+        lines.append(f"[系统状态] 当前可用知识库缓存已挂载（体积估算: {memory_total_tokens} Tokens）。")
+        lines.append("【工作指引】: 请继续检查并收集其他缺漏情报；如果所有核心事实均已齐备，请立即调用 generate_final_aggregate_reports 进入最终聚合。")
+            
+        lines.append("\n以下是已获取的可用情报，请据此决定下一步：")
+        lines.extend(memory_details)
+        return "\n".join(lines)
+
+    def _mount_local_sandbox(self) -> str:
+        pending_items = []
+        for fid, path in self.id_to_path.items():
+            if fid in self.abandoned_file_ids:
+                continue 
+            if f"Preview_{fid}" in self.memory_catalog or f"Summary_{fid}" in self.memory_catalog:
+                continue 
+            pending_items.append(f"- {fid}: {os.path.basename(path)} [未读]")
+            
+        if not pending_items:
+            return ""
+            
+        lines = [
+            "【挂载模块: 本地文件沙盒】", 
+            f"发现 {len(pending_items)} 个尚未探索的本地文件资源："
+        ]
+        lines.extend(pending_items[:15])
+        if len(pending_items) > 15:
+            lines.append("... (隐藏剩余未处理文件，使用 search_local_file 检索)")
+            
+        return "\n".join(lines)
+
+    def _mount_feedback(self) -> str:
+        if not self.last_feedback:
+            return ""
+        return f"【挂载模块: 最新执行反馈】\n{self.last_feedback}"
+
+    def to_markdown_context(self) -> str:
+        modules = [
+            self._mount_global_env(),
+            self._mount_memory_catalog(),
+            self._mount_local_sandbox(),
+            self._mount_feedback()
+        ]
+        return "\n\n".join(m for m in modules if m)
 
 
 class Orchestrator:
     def __init__(self):
-        self.llm = LLMClient()
-        self.tracker = EventTracker(
-            log_dir=TRACKING.get("log_dir", "./logs"), 
-            enable=TRACKING.get("enable", True)
-        )
+        self.tracker = EventTracker(log_dir=TRACKING.get("log_dir", "./logs"), enable=TRACKING.get("enable", True))
+        self.state = AgentState()
+        self.state.working_memory["__category_tree__"] = {} 
+        self.analyzer = Analyzer()
+        self.planner = Planner()
 
-    def _get_active_schemas(self):
-        return TOOL_SCHEMAS_POOL
-
-    def _run_isolated_check(self, func_name: str, result_str: str) -> tuple[bool, str]:
-        """
-        🕵️ 独立沙盒审查机制：专门阻断小模型产生幻觉或乱码导致脏数据污染主脑上下文。
-        返回：(是否通过审核, 审核意见)
-        """
-        # 只对容易产生大段文本幻觉的节点进行审查
-        if func_name not in ["preview_document_content", "delegate_to_small_models"]:
-            return True, "PASS"
-            
-        sys_prompt = "你是一个独立的无责审核模块。请根据指令客观评估其他模型的输出质量。"
-        user_prompt = build_isolated_check_prompt(func_name, result_str)
+    def run(self, user_query: str, task_id: str = None) -> str:
+        self.state.task_id = task_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.state.task_output_dir = os.path.join(DATA_PIPELINE.get("output_directory", "./data/output"), self.state.task_id)
+        os.makedirs(self.state.task_output_dir, exist_ok=True)
         
-        messages = [
-            {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
-        try:
-            # 开启纯对话模式，不传入 tools 参数，保证上下文绝对隔离
-            response = self.llm.chat_completion(messages)
-            check_result = response.content.strip()
-            
-            self.tracker.track("Isolated_Check", input_data={"func": func_name, "content": result_str[:200]}, output_data=check_result)
-            
-            if check_result.upper().startswith("FAIL"):
-                return False, check_result
-            return True, "PASS"
-        except Exception as e:
-            # 如果审核网关自己请求失败，默认放行，防止系统卡死
-            return True, f"Check bypassed due to internal error: {str(e)}"
-
-    def run(self, user_query: str) -> str:
         self.tracker.track("User_Input", input_data=user_query, output_data=None)
+        self.state.user_query = user_query
         
+        debug_dir = DATA_PIPELINE.get("debug_directory", "./data/debug_slm")
+        os.makedirs(debug_dir, exist_ok=True)
+        session_id = self.state.task_id
+        trace_file = os.path.join(debug_dir, f"DeepResearch_Trace_{session_id}.md")
+        
+        with open(trace_file, "w", encoding="utf-8") as f:
+            f.write(f"# Deep Research 执行追踪日志\n\n**启动时间**: {session_id}\n**用户指令**: {user_query}\n\n---\n\n")
+
+        # UI 中文映射字典
+        PHASE_MAP = {
+            "DISCOVERY": "🔍 探测与发现",
+            "EXTRACTION": "📑 深度提取",
+            "SYNTHESIS": "🧠 聚合适成"
+        }
+        ACTION_MAP = {
+            "search_local_file": "检索沙盒文件",
+            "preview_document_content": "试读文档摘要",
+            "delegate_to_small_models": "调度小模型提炼全文",
+            "query_checkpoint_via_slm": "执行记忆区细节捞针",
+            "batch_process_individual_reports": "归档单篇独立报告",
+            "compress_working_memory": "执行工作记忆压缩",
+            "generate_final_aggregate_reports": "排版聚合最终研报",
+            "execute_web_search": "执行互联网检索",
+            "finish_task": "任务逻辑闭环退出",
+            "none": "思考下一步方向"
+        }
+
+        progress_log = []
+        def push_progress(msg: str):
+            progress_log.append(msg)
+            update_task_progress(self.state.task_id, "\n".join(progress_log))
+
+        push_progress("🚀 正在初始化环境，构建工作区内存与检索本地文件...")
+
+        try:
+            initial_files_json = ToolRegistry.execute("search_local_file", {"keyword": ""}, {})
+            initial_files = json.loads(initial_files_json)
+            for i, p in enumerate(initial_files):
+                fid = f"DOC_{i+1}"
+                self.state.id_to_path[fid] = p
+                self.state.path_to_id[p] = fid
+            self.state.last_feedback = f"系统就绪，目录中发现 {len(initial_files)} 份可用文件。"
+            push_progress(f"✅ 环境就绪：感知到 {len(initial_files)} 份文件。\n")
+        except Exception:
+            self.state.last_feedback = "目录为空。"
+            push_progress(f"✅ 环境就绪：本地沙盒目录为空。\n")
+            
         step_count = 0
-        MAX_STEPS = 20
-        execution_history = []
-
+        MAX_STEPS = 40 
+        
         while step_count < MAX_STEPS:
+            if is_task_stopped(self.state.task_id):
+                self.state.last_feedback = "任务已被用户手动终止。"
+                self.state.is_finished = True
+                self.state.final_result = "执行中止: 任务已被手动停止。"
+                push_progress("\n⚠️ 任务被手动中止。")
+                return self.state.final_result
+                
             step_count += 1
-            
-            sys_prompt = build_orchestrator_system_prompt()
-            user_prompt = build_orchestrator_user_prompt(user_query, execution_history)
-            
-            messages = [
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": user_prompt}
-            ]
-            
-            message = self.llm.chat_completion(messages, tools=self._get_active_schemas())
-            
-            # 退出条件：主模型没有再发起工具调用
-            if not getattr(message, "tool_calls", None):
-                content = message.content
-                self.tracker.track("LLM_Final_Response", input_data=messages, output_data=content)
-                return content
+            context_text = self.state.to_markdown_context()
 
-            tool_calls_dump = [{"name": tc.function.name, "args": tc.function.arguments} for tc in message.tool_calls]
-            self.tracker.track("LLM_Tool_Decision", input_data=messages, output_data=tool_calls_dump)
+            try:
+                push_progress(f"🤔 [思考步数 {step_count}] 正在分析环境状态与任务缺口...")
 
-            for tool_call in message.tool_calls:
-                func_name = tool_call.function.name
+                analysis = self.analyzer.analyze_intent_and_phase(user_query, context_text)
+                phase = analysis.get("next_phase", "DISCOVERY")
+                missing_info = analysis.get("missing_information", "无")
                 
-                # 🚨 应用强鲁棒性的 JSON 解析
-                try:
-                    args = robust_json_parse(tool_call.function.arguments)
-                except ValueError as e:
-                    execution_history.append(f"❌ 规划失败: {func_name} 的参数格式错误。请保持标准 JSON 格式，且勿在外部包裹 Markdown 代码块标签。报错详情: {str(e)}")
-                    continue
+                if "refined_query" in analysis and analysis["refined_query"]:
+                    self.state.refined_query = analysis["refined_query"]
+                if "entity_audit" in analysis:
+                    self.state.entity_audit.update(analysis["entity_audit"])
+                    
+                abandoned = analysis.get("abandoned_file_ids", [])
+                if isinstance(abandoned, list) and abandoned:
+                    self.state.abandoned_file_ids.update(abandoned)
                 
-                if func_name in TOOL_REGISTRY:
-                    try:
-                        result = TOOL_REGISTRY[func_name](tracker=self.tracker, **args)
-                        result_str = str(result)
-                        
-                        # 🚨 触发上下文完全隔离的“无责审查”拦截器
-                        is_pass, check_msg = self._run_isolated_check(func_name, result_str)
-                        
-                        if not is_pass:
-                            # 审核不通过，记录到主脑历史中，主脑会自动决定如何重试或跳过
-                            execution_history.append(f"⚠️ 工具 {func_name} 已执行，但结果被安全网关判定为不可用被拦截。原因: {check_msg}")
-                            continue
-
-                        # 🚨 审核通过后，为了防御爆显存进行截断
-                        if len(result_str) > 1500:
-                            result_str = result_str[:1500] + "\n...(详情已存入底层缓存，请基于此缩略素材进行后续规划)..."
-
-                        execution_history.append(f"✅ {func_name} 执行成功:\n{result_str}")
-                        
-                    except Exception as e:
-                        execution_history.append(f"❌ {func_name} 运行时异常: {str(e)}")
-                else:
-                    execution_history.append(f"❌ 未找到对应工具: {func_name}")
+                print(f"\n" + "="*50)
+                print(f"🕵️ [Deep Research 步数 {step_count}]")
+                if self.state.abandoned_file_ids:
+                    print(f"🗑️ 物理屏蔽资源: {list(self.state.abandoned_file_ids)}")
+                print(f"🔍 实体审计 (Entity Audit):")
+                for ent, desc in analysis.get('entity_audit', {}).items():
+                    print(f"  - {ent}: {desc}")
+                print(f"💧 脱水目标: {self.state.refined_query}")
+                print(f"🎯 缺口提取: {missing_info}")
+                print(f"📍 当前阶段: {phase}")
+                print("="*50)
                 
-        return "⚠️ 运行超过最大步数限制 (20步)，任务被迫终止。"
+                plan = self.planner.plan_next_action(user_query, analysis, context_text, phase)
+                action, args = plan["action"], plan["args"]
+                print(f"[工具调用]: -> {action}()")
+
+                friendly_phase = PHASE_MAP.get(phase, phase)
+                friendly_action = ACTION_MAP.get(action, action)
+                
+                push_progress(f"  ├─ 阶段: {friendly_phase}\n  ├─ 缺口: {missing_info}\n  └─ 动作: 调度工具 [{friendly_action}]")
+                
+                self.tracker.track("Routing", input_data=phase, output_data=plan)
+
+                step_log = f"## 🏃 步骤 {step_count} (阶段: {phase})\n\n"
+                step_log += "### 1. 状态分析 (Analyzer)\n"
+                step_log += f"- **脱水目标**: {self.state.refined_query}\n"
+                step_log += f"- **实体审计**: \n```json\n{json.dumps(analysis.get('entity_audit', {}), ensure_ascii=False, indent=2)}\n```\n"
+                step_log += f"- **缺口提取**: {missing_info}\n\n"
+                step_log += "### 2. 工具路由 (Planner)\n"
+                step_log += f"- **动作**: `{action}`\n"
+                step_log += f"- **参数**: \n```json\n{json.dumps(args, ensure_ascii=False, indent=2)}\n```\n\n"
+                
+                with open(trace_file, "a", encoding="utf-8") as f:
+                    f.write(step_log)
+
+                env_context = {
+                    "original_goal": user_query,  
+                    "path_to_id": self.state.path_to_id,
+                    "id_to_path": self.state.id_to_path,
+                    "working_memory": self.state.working_memory,
+                    "tracker": self.tracker,
+                    "agent_state": self.state,
+                    "task_id": self.state.task_id 
+                }
+                
+                if "file_ids" in args:
+                    args["actual_file_ids"] = args["file_ids"]
+                    args["file_paths"] = [self.state.id_to_path.get(fid) for fid in args["file_ids"] if fid in self.state.id_to_path]
+
+                result = ToolRegistry.execute(action, args=args, context=env_context)
+
+                push_progress(f"✅ [执行完成] 工具返回结果，整理进入下一轮...\n")
+
+                with open(trace_file, "a", encoding="utf-8") as f:
+                    f.write(f"### 3. 工具执行结果\n\n```text\n{result}\n```\n\n---\n\n")
+
+                if self.state.is_finished:
+                    if "排版研报" not in str(self.state.final_result) and not is_task_stopped(self.state.task_id):
+                        print("\n[系统兜底] 检测到任务结束，强制调起聚合引擎...")
+                        push_progress("🔧 检测到任务闭环，正在生成最终聚合研报...")
+                        from workflows.report_flow import generate_final_aggregate_reports
+                        generate_final_aggregate_reports(working_memory=self.state.working_memory, tracker=self.tracker, agent_state=self.state)

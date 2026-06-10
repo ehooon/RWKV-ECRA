@@ -1,23 +1,30 @@
+# RWKV-ECRA/clients/slm_client.py
 import json
 import requests
 import time
-from config import SLM_CONFIG
+from config import get_slm_endpoint, get_slm_password
 
 class SLMClient:
     def __init__(self):
-        self.endpoint = SLM_CONFIG.get("endpoint", "http://192.168.0.125:8000/v1/chat/completions")
-        self.password = SLM_CONFIG.get("password", "rwkv7_13.3b") 
         self.headers = {"Content-Type": "application/json"}
+
+    @property
+    def endpoint(self):
+        return get_slm_endpoint()
+
+    @property
+    def password(self):
+        return get_slm_password()
 
     def batch_generate(self, contents: list[str], tracker=None) -> list[str]:
         payload = {
             "contents": contents,
-            "max_tokens": 1500,       # 🚨 限制最大输出，防止失控
-            "temperature": 0.3,       # 🚨 降低随机性，保证提炼准确性
-            "top_k": 50,
-            "top_p": 0.85,
-            "alpha_presence": 0.5,    # 🚨 鼓励输出新内容
-            "alpha_frequency": 0.8,   # 🚨 强力压制重复词，根治复读机
+            "max_tokens": 1500,       
+            "temperature": 1.0,       
+            "top_k": 20,
+            "top_p": 0.95,
+            "alpha_presence": 1.5,    
+            "alpha_frequency": 0.0,   
             "alpha_decay": 0.99,
             "stream": True,
             "password": self.password
