@@ -1,38 +1,62 @@
 # RWKV-ECRA/agent/planner.py
 import json
+import re
 from clients.llm_client import LLMClient
-from schemas.progressive_tools import TOOL_GROUPS
+from tools.registry import ToolRegistry
 
 class Planner:
     def __init__(self):
         self.llm = LLMClient()
         
     def plan_next_action(self, user_query: str, analysis_result: dict, env_context: str, phase: str) -> dict:
-        available_tools = TOOL_GROUPS.get(phase, TOOL_GROUPS["DISCOVERY"])
+        tool_interfaces = ToolRegistry.get_interfaces_by_phase(phase)
+        active_query = analysis_result.get('refined_query', user_query)
+        missing_info = analysis_result.get('missing_information', '无')
         
-        sys_prompt = f"""你是执行规划师。上游分析师已定位当前阶段为：【{phase}】。
-建议：{analysis_result.get('missing_information', '无')}
-请结合用户目标，从我提供的 tools 工具中强制选择一个最合适的工具，并输出参数。
-注意：操作文件必须使用虚拟ID（如 DOC_1）。"""
+        sys_prompt = f"""任务：基于缺口生成工具调用的 JSON 参数。
+
+[环境目标]
+- 目标：{active_query}
+- 缺口：{missing_info}
+
+{tool_interfaces}
+
+[执行约束]
+1. 执行 execute_web_search 时，提取缺口中的核心实体，剥离无关上下文。
+2. 执行 delegate_to_small_models 时，必须从环境状态中提取出准确的 file_ids（如 ["DOC_1"]）。
+
+[示例]
+缺口: "需要提炼未读文件: DOC_1, DOC_2"
+-> {{"action": "delegate_to_small_models", "args": {{"file_ids": ["DOC_1", "DOC_2"]}}}}
+
+缺口: "调查 Hongkong Doll 是否对 ETH 产生影响"
+-> {{"action": "execute_web_search", "args": {{"query": "Hongkong Doll 真实身份 履历"}}}}
+
+必须只输出 JSON："""
         
         messages = [
             {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": f"目标:{user_query}\n当前沙盒:\n{env_context}"}
+            # 🔴 核心修复：把 env_context 传给 Planner，让它知道当前有哪些 DOC 可以被提取！
+            {"role": "user", "content": f"当前环境状态：\n{env_context}\n\n请针对核心缺口，直接输出 JSON 格式的工具规划。"}
         ]
         
-        resp = self.llm.client.chat.completions.create(
-            model=self.llm.model,
-            messages=messages,
-            tools=available_tools,
-            tool_choice="required",
-            temperature=0.1
-        ).choices[0].message
-        
-        if not getattr(resp, "tool_calls", None):
-            raise ValueError("大模型拒绝调用工具")
+        try:
+            llm_response = self.llm.chat_completion(messages).content
             
-        tool_call = resp.tool_calls[0]
-        return {
-            "action": tool_call.function.name,
-            "args": json.loads(tool_call.function.arguments)
-        }
+            print(f"[大模型规划原始输出]:\n{llm_response.strip()}")
+
+            match = re.search(r'\{.*\}', llm_response, re.DOTALL)
+            clean_json = match.group(0) if match else llm_response
+            
+            plan_data = json.loads(clean_json)
+            
+            return {
+                "action": plan_data.get("action", "none"),
+                "args": plan_data.get("args", {})
+            }
+        except Exception as e:
+            print(f"[JSON 解析失败] 大模型返回不合法: {llm_response}")
+            return {
+                "action": "none",
+                "args": {}
+            }

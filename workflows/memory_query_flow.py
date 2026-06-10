@@ -6,11 +6,19 @@ from utils.chunker import semantic_chunk_text
 from config import DATA_PIPELINE, SLM_CONFIG
 from utils.checkpoint import get_checkpoint
 from prompts.slm_prompts import build_slm_query_checkpoint_prompt
-from workflows.map_reduce_flow import clean_slm_output # 复用清洗逻辑
-from workflows.report_flow import get_fs_category_tree # 复用树检索
+from workflows.map_reduce_flow import clean_slm_output
+from workflows.report_flow import get_fs_category_tree
+from tools.registry import ToolRegistry
 
 slm_client = SLMClient()
 
+@ToolRegistry.register(
+    name="query_checkpoint_via_slm",
+    phase="EXTRACTION",
+    signature="""[Tool] query_checkpoint_via_slm
+- 功能: [局部问答] 仅限已提炼进记忆区的文件。针对特定细节进行捞针提问，严禁用于首次全文阅读。
+- 参数: file_ids (目标文件虚拟ID数组), query_instruction (捞针问题)"""
+)
 def query_checkpoint_via_slm(file_paths: List[str] = None, query_instruction: str = "捞针", tracker=None, **kwargs) -> str:
     if not file_paths: return "未提供目标路径。"
     final_feedback = []
@@ -22,7 +30,6 @@ def query_checkpoint_via_slm(file_paths: List[str] = None, query_instruction: st
         fname_no_ext = os.path.splitext(fname)[0]
         memory_text = ""
         
-        # 优先读成型报告
         for m_cat, subs in cat_tree.items():
             for s_cat, docs in subs.items():
                 for d in docs:
@@ -33,7 +40,6 @@ def query_checkpoint_via_slm(file_paths: List[str] = None, query_instruction: st
                         except: pass
                         break
         
-        # 降级读缓存
         if not memory_text:
             memory_text = get_checkpoint(file_path)
 

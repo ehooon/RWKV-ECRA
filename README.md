@@ -2,154 +2,134 @@
 
 语言：中文 | [English](README.en.md)
 
-示例输出：参考 data/output
+## 功能介绍和效果展示
 
-RWKV-ECRA 是一个端云协同的长文档分析 Agent：
-- 通过端云协同的方法，估算每小时可以分析千万 token 级的文本，同时可以节省 80% 以上的 token
+目前主要功能为长文本分析，可以达到类 DeepResearch 的效果，但不会像常见的 DeepResearch 系统做出决定，只会呈现分析；
 
-- 由大模型负责理解任务、规划步骤、调用工具和撰写最终报告
+启用前端后，可以逐个输入研究内容进行排队；
+![](./Imgs/example.png)
 
-- 使用可以在单张 5090 上达到 10000+ token/s 速度的 RWKV-7 7.2B 最新版本负责对长文档进行分块阅读、事实提取、摘要压缩和中间材料生产
+最终的报告会呈现对于已有内容的分析并标注来源，更多示例可以在 data/output 目录下查看，为了避免版权问题，input目录下仅存放了在arxiv上开放获取的论文。
+![](./Imgs/example1.png)
 
-- 项目目标不是让单个模型一次性吞下全部上下文，而是把长文档分析拆成可追踪、可恢复、可扩展的协作节点，最终生成跨文件的深度分析报告
 
-当前版本的核心能力：
-
-- 扫描 `data/input` 下的本地文档，目前支持 `.txt` 和 `.md`
-- 对文档进行抽样试读，先判断主题、体裁和分析策略
-- 将长文档切分为语义片段，交给小模型批量并行处理
-- 采用 Summary + Facts 双轨提取：一条轨道负责逻辑摘要，一条轨道负责关键事实保真
-- 使用 Reduce 步骤逐层压缩和合并片段材料
-- 由大模型融合所有中间材料，亲自写出最终 Markdown 报告
-- 支持中间结果 checkpoint、运行日志和小模型调用日志，便于恢复与排查
-
-## 项目用法
+## 使用方法
 
 ### 1. 准备环境
 
 建议使用 Python 3.10 或更新版本。
 
-安装当前代码需要的基础依赖：
+安装当前代码需要的基础依赖（建议用 uv pip，自动处理冲突更快）：
 
 ```bash
-pip install openai requests tiktoken
+pip install fastapi uvicorn python-multipart openai requests tavily-python
 ```
 
-项目默认使用：
+> 项目默认使用 RWKV 最新版本模型，已配置好 7.2B 适用的提示词和适用参数，使用更大模型可以不更改参数，使用更小模型建议缩小输入长度，其他参数仍是较优参数；
 
-- 小模型：本地 RWKV 模型，配置和使用方法参考 [RWKV 中文官网高并发推理教程](https://www.rwkv.cn/tutorials/intermediate/rwkv_lightning)，配置在 `config.py` 的 `SLM_CONFIG`。
-- 大模型：百度 AI Studio 兼容 OpenAI SDK 的接口，配置在 `clients/llm_client.py` 和 `config.py`，使用需要到[飞桨星河平台](https://aistudio.baidu.com/account/accessToken)获取key。
+> 配置了基于火山引擎和飞桨星河的大模型调用，其中飞桨配置的大模型调用内嵌搜索引擎，已设置强制引用，针对火山引擎配置了`tavily`，后续会增加搜索更全面的其他引擎。
 
-（为什么在这里用文心？因为我没配置 web_search，所以找了一个内嵌 web_search 的文心5.1，便于测试后续加入 deepresearch 等协作）
+### rwkv_lightning 配置说明
 
-运行前请确认：
+本项目需要调用 [rwkv_lightning](https://github.com/RWKV-Vibe/rwkv_lightning) 启动的模型，后续会增加[Albatross](https://github.com/BlinkDL/Albatross) 推理引擎的调用方法；
 
-1. `config.py` 中的 `API_KEYS["baidu"]` 已替换为可用 key。
-2. 本地小模型服务已经启动，并且接口、密码与 `SLM_CONFIG` 一致。
-3. 待分析文件已放入 `data/input` 目录。
+详细的配置和使用教程参考 [rwkv_lightning 批量推理教程](https://www.rwkv.cn/tutorials/intermediate/rwkv_lightning)
 
-### 2. 放入输入文件
+### 3. 参数配置说明
 
-把需要分析的 `.md` 或 `.txt` 文件放到：
+此处为 config.json 中的参数说明
 
-```text
-data/input/
-```
+> 运行前需要配置的部分
 
-如果要分析多个文件，Agent 会先扫描文件列表，再逐个试读和委托分析，最后在总报告里做跨文件关联分析。
+| 参数名 | 参数功能 | 可选项 |
+| :--- | :--- | :--- |
+| `LLM_PROVIDER` | 模型来源，目前可选火山引擎和飞桨星河 | `baidu` `volcengine` |
+| `API_KEYS.baidu` | 飞桨星河的 API_Key | `任意合法 Key`（不用可以不配置） |
+| `API_KEYS.volcengine` | 火山引擎的 API_Key | `任意合法 Key`（不用可以不配置） |
+| `API_KEYS.tavily` | tavily 搜索引擎的 API_Key | `任意合法 Key` |
 
-### 3. 修改任务指令
+其他已预制可修改的参数请查看附录
 
-当前入口在 `main.py`。可以修改其中的 `query` 来改变任务目标，例如：
-
-```python
-query = "帮我深度分析 tilelang 这篇文章，并给出跨文件关联分析。"
-```
-
-### 4. 运行项目
+### 4. 纯命令行启动
 
 ```bash
+cd RWKV-ECRA
 python main.py
 ```
 
-运行后，项目会自动创建输入、输出等目录，并执行完整分析流程。
-
-最终报告会写入：
-
-```text
-data/output/
+启动可以在命令行输入指令：
+```
+帮我看看基于RWKV的研究的动态，并看看有什么目前和RWKV无直接关系，但是有可能后续能支持RWKV研究或被RWKV支撑进行研究的，注意不要只看本地的文件，还要搜一下
 ```
 
-运行过程日志会写入：
+### 5. 可视化启动
 
-```text
-logs/
+```bash
+python api.py
 ```
+启动后，服务默认在 http://0.0.0.0:8787 运行，前端已适配此端口；
 
-中间 checkpoint 会写入：
+然后启动另一个终端，进入 `RWKV-ECRA/frontend`
 
-```text
-data/checkpoints/
+```bash
+npm install
+npm run dev
 ```
+> 此处需要提前配置 Node.js，配置方法请查看 Node.js 官网；
 
-任务完成后，当前实现会清理 checkpoint。若任务中断，下次启动时会检测 checkpoint 并尝试复用已有中间结果。
+启动后，默认运行在 `http://127.0.0.1:5177`
 
-## 项目设计逻辑
+## 后续优化计划
 
-这个项目的设计逻辑是：保持当前主流程稳定，在主流程的每个节点上增删协作机制，用协作优化当前节点的效果。后续可以继续添加循环 check、质量评估、反思修正等机制，但当前版本先专注核心结构。
+- 内置 [Albatross](https://github.com/BlinkDL/Albatross) 推理引擎，保留目前的在[rwkv_lightning](https://github.com/RWKV-Vibe/rwkv_lightning)起的服务上运行的方法；
+- 优化效果和执行路径
+- 美化前端和细化日志，目前前端不够漂亮，逻辑也不够优美
+- 支持更多来源的大模型和搜索引擎
+- 目前还存在一些引用解析和传递问题，近期会修复
 
-主流程可以理解为：
+## 附录
+### 1. 其他可修改参数
+> 已设置了默认参数，可更改的部分
 
-```text
-理解用户意图
-  -> 盘点本地文件
-  -> 抽样试读并构建文件画像
-  -> 制定分析策略
-  -> 委托小模型执行 MapReduce
-  -> 大模型融合材料并撰写最终报告
-  -> 导出 Markdown
-```
-
-### 1. 大模型负责主线编排
-
-`agent/orchestrator.py` 中的 `Orchestrator` 是主控入口。不直接读取和总结所有文档，而是通过工具调用推进任务：
-
-- `search_local_file`：扫描输入目录，获取可处理文件列表
-- `preview_document_content`：对单个文件抽样试读，帮助判断文档结构和重点
-- `delegate_to_small_models`：把长文档处理任务下发给小模型协作引擎
-- `export_report_to_md`：保存大模型亲自撰写的最终报告
-
-大模型在这里承担“规划”任务：理解需求、选择工具、决定每个文件的处理策略，并在最后把分散材料重新组织成一份连贯报告。
-
-### 2. 小模型负责局部高并发处理
-
-`tools/local_data_processor.py` 中的 `delegate_to_small_models` 是当前协作结构的核心。它会把长文档切分成多个 chunk，然后对每个 chunk 同时发起两类任务：
-
-- Summary 轨道：提炼片段的逻辑、结构和主题
-- Facts 轨道：提取关键事实、数据、术语和明确结论
-
-在保持事实提取精度的同时进行高质量总结。
-
-### 3. Reduce 负责压缩和合并
-
-当 chunk 数量较多时，片段摘要会继续进入 Reduce 阶段。Reduce 会按 token 数量分组，把多个局部摘要逐层合并为更短、更集中的材料。
-
-这个阶段的目标不是生成最终文章，而是把“小模型局部阅读结果”压缩成“大模型可吸收的中间材料”。最终表达权仍然交给大模型。
-
-### 4. Checkpoint 和日志保证过程可追踪
-
-项目内置了两类辅助机制：
-
-- `utils/checkpoint.py`：缓存已经完成的文件级分析结果，减少中断后重复计算
-- `utils/tracker.py`：记录大模型决策、小模型输入输出和工具执行结果，便于调试和复盘
-
-这些机制不是主流程本身，但它们让协作过程更稳：失败可以恢复，效果可以观察，问题可以定位。
-
-### 5. 后续优化计划
-
-- 做一个能用的前端，现在直接在代码里改提示词太简陋了
-- 在试读后加入策略 check，判断是否需要重新选择分析重点
-- 在 MapReduce 后加入质量 check，发现空摘要、幻觉或事实不足时重跑局部节点
-- 在最终报告前加入 cross-file check，专门检查跨文件关联是否充分
-- 引入 PaddleOCR-VL 或其他以视觉语言OCR模型来处理“任意文件”
-- 在节点上增加更多协作角色，保持主流程稳定的同时，逐节点优化
+| 参数名 | 参数功能 | 可选项 |
+| :--- | :--- | :--- |
+| `LLM_ENDPOINTS.volcengine.base_url` | 火山引擎的模型调用链接 | `https://ark.cn-beijing.volces.com/api/v3` |
+| `LLM_ENDPOINTS.volcengine.model` | 火山引擎的模型名，详情查询火山引擎文档 | `doubao-seed-2-0-lite-260428` |
+| `LLM_ENDPOINTS.volcengine.reasoning_effort` | 火山引擎模型的思考级别，详情查看火山引擎文档 | `medium` |
+| `LLM_ENDPOINTS.baidu.base_url` | 飞桨星河的模型调用链接 | `"https://aistudio.baidu.com/llm/lmapi/v3"` |
+| `LLM_ENDPOINTS.baidu.model` | 飞桨星河的模型名 | `ernie-5.1` |
+| `LLM_ENDPOINTS.baidu.max_completion_tokens` | 飞桨星河的最大输出 token 限制 | 需要小于`65536` |
+| `LLM_ENDPOINTS.baidu.enable_web_search` | 是否开启文心模型的内嵌网页搜索功能 | `true` |
+| `SEARCH_CONFIG.search_depth` | tavily 搜索引擎的搜索级别参数 | `advanced` |
+| `SEARCH_CONFIG.max_results` | tavily 搜索引擎的最大返回网页数 | `10` |
+| `SEARCH_CONFIG.time_range` | tavily 搜索引擎的时间范围 | `year` `month` `week` `day` `none`|
+| `SEARCH_CONFIG.chunks_per_source` | 每个回复的分块数 | `5` |
+| `DATA_PIPELINE.input_directory` | 工作区输入路径 | `./data/input` |
+| `DATA_PIPELINE.output_directory` | 工作区的结果输出路径| `./data/output` |
+| `DATA_PIPELINE.checkpoint_directory` | 暂存点路径 | `"./data/checkpoints"` |
+| `DATA_PIPELINE.debug_directory` | RWKV 模型的 debug 日志输出路径| `./data/debug_slm` |
+| `DATA_PIPELINE.enable_debug_slm` | 是否开启 RWKV 模型的 debug 日志输出| `false` `true`|
+| `DATA_PIPELINE.allowed_extensions` | 允许的输入文件类型，本项目未适配 pdf 或其他解析，建议先转换为当前可选项 | `[".txt", ".md"]` |
+| `DATA_PIPELINE.max_chunk_tokens` | RWKV 模型最大输入 token 数| 任意整数（建议在 1600~2400） |
+| `DATA_PIPELINE.overlap_ratio` | RWKV 模型处理时的上下文交叉比例 | 任意小数（建议 0，05） |
+| `DATA_PIPELINE.reduce_group_size` | RWKV 模型二次总结合并时的批大小 | 任意整数（建议小于 4） |
+| `DATA_PIPELINE.reduce_target_chunks` | | `1` |
+| `DATA_PIPELINE.reduce_max_tokens` | 在 RWKV 总结/压缩次数达到上限后，由 LLM 进行总结的最大输入 | 任意整数，建议取值为 min(32k,模型最大上下文/2) |
+| `DATA_PIPELINE.slm_reduce_steps` | RWKV 的最多压缩步数 | 任意整数，建议为 2 |
+| `DATA_PIPELINE.llm_safe_window_tokens` | 输入给大模型的最大输入 | `60000` |
+| `DATA_PIPELINE.map_focus` | 分片总结的指令 | `"保持原意压缩，提取核心逻辑，严格保留所有事实性内容"` |
+| `DATA_PIPELINE.reduce_rule` | 合并总结的指令 | `"保持原意压缩，去重并合并同类逻辑，绝对保留事实性数据和原始结论"` |
+| `DATA_PIPELINE.map_focus_en` | 分片总结的指令英文版 | `"Compress while maintaining original meaning, extract core logic, strictly preserve all factual content"` |
+| `DATA_PIPELINE.reduce_rule_en` | 合并总结的指令英文版| `"Compress while maintaining original meaning, deduplicate and merge similar logic, absolutely preserve factual data and original conclusions"` |
+| `DATA_PIPELINE.english_ratio_threshold` | 英文比例占比数大于此数字时判断为英文文档，否则为中文 | `0.5` |
+| `DATA_PIPELINE.reduce_max_tokens_internal` | 合并时的最大输入数 | `3500` |
+| `DATA_PIPELINE.slm_repeat_threshold` | | `5` |
+| `AGENT_CONFIG.max_files_per_batch` | 每轮处理的最大文件数 | `10` |
+| `AGENT_CONFIG.max_error_retries` | | `3` |
+| `AGENT_CONFIG.memory_truncate_length` | | `60000` |
+| `SLM_CONFIG.endpoint` | RWKV 的调用端点 | `"http://192.168.0.82:8080/v1/chat/completions"` |
+| `SLM_CONFIG.password` | RWKV 的调用密码（无密码可置空） | `"rwkv7_7.2b"` |
+| `SLM_CONFIG.concurrency` | RWKV 的最大并发数 | 整数，7.2B 时，24G 显存设置为 16G 为较优 |
+| `TRACKING.enable` | 是否追踪日志 | `true` |
+| `TRACKING.enable_slm_log` | 是否追踪 RWKV 的处理日志| `false` |
+| `TRACKING.log_dir` | 日志存放路径 | `"./logs"` |

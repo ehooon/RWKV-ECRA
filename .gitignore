@@ -10,7 +10,16 @@
 !*.txt
 !*.png
 !*.jpg
+|*.json
 
 # 4. （可选）如果你希望 .gitignore 文件本身也能被提交并同步到仓库，请保留下面这行：
 !.gitignore
 !.gitattributes
+
+# 5. Frontend app
+!frontend/
+!frontend/**
+frontend/node_modules/
+frontend/dist/
+debug_slm/
+logs/
