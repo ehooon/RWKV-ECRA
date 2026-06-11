@@ -398,9 +398,20 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                     # 按照用户要求，网络角标为 ^[X]^，本地角标为 ^{X}^
                     return f"^[{idx}]^" if is_web else f"^{{{idx}}}^"
 
-                # 替换当前节点内的角标
-                beautified_mapped = re.sub(r'\^\[(WEB_REF_[\w\-]+)\]\^', lambda m: map_and_replace_citation(m, True), beautified_content)
-                beautified_mapped = re.sub(r'\^\{(LOC_REF_[\w\-]+)\}\^', lambda m: map_and_replace_citation(m, False), beautified_mapped)
+                # ==========================================
+                # 🔴 核心修复：宽容匹配大模型可能漏写的符号，但只吞噬并替换残缺的 REF_ID。
+                # 完美保留正文合法的文字与普通中括号 [2]，例如：[2][WEB_REF_XXX]^ -> [2]^[idx]^
+                # ==========================================
+                beautified_mapped = re.sub(
+                    r'\^?\[?(WEB_REF_[\w\-]+)\]?\^?', 
+                    lambda m: map_and_replace_citation(m, True), 
+                    beautified_content
+                )
+                beautified_mapped = re.sub(
+                    r'\^?[\{\[]?(LOC_REF_[\w\-]+)[\}\]]?\^?', 
+                    lambda m: map_and_replace_citation(m, False), 
+                    beautified_mapped
+                )
                 
                 node["raw_content"] = raw_content
                 node["beautified_content"] = beautified_mapped

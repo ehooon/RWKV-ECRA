@@ -46,7 +46,14 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
             structured_facts = []
             
             # 将文心的局部角标 ^[1]^ 映射到全局唯一的 WEB_REF
-            for res in search_results:
+            # 🔴 核心修复：按索引倒序排序，确保 [10] 在 [1] 之前被替换，防止映射错位
+            sorted_results = sorted(
+                search_results, 
+                key=lambda x: int(x.get("index", 0)) if str(x.get("index", 0)).isdigit() else 0, 
+                reverse=True
+            )
+            
+            for res in sorted_results:
                 idx = res.get("index")
                 url = res.get("url", "")
                 title = res.get("title", f"参考资料_{idx}")

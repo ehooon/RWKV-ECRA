@@ -133,113 +133,158 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
 @retry_with_fallback(max_retries=3, delay=5)
 def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List[str] = None, working_memory: dict = None, tracker=None, task_id: str = None, **kwargs) -> str:
     if not file_paths: return "未传入目标文件路径"
-    cfg = DATA_PIPELINE
     
+    cfg = DATA_PIPELINE
     concurrency_limit = SLM_CONFIG.get("concurrency", 16)
     reduce_group_size = cfg.get("reduce_group_size", 4) 
     llm_safe_window = cfg.get("llm_safe_window_tokens", 60000)
+    slm_reduce_steps_limit = cfg.get("slm_reduce_steps", 2)
     
     debug_dir = cfg.get("debug_directory", "./data/debug_slm")
     enable_debug = cfg.get("enable_debug_slm", False)
-    if enable_debug:
-        os.makedirs(debug_dir, exist_ok=True)
+    if enable_debug: os.makedirs(debug_dir, exist_ok=True)
     
     final_feedback = []
     
+    # 🌟 1. 状态机初始化与任务入队
+    doc_states = {}
+    ready_queue = [] # 存放元组: (doc_idx, stage_str, seq_idx, prompt)
+
     for idx, file_path in enumerate(file_paths):
-        if task_id and is_task_stopped(task_id):
-            final_feedback.append("⚠️ 任务已被用户终止，取消后续文件提炼。")
-            break
-            
+        if task_id and is_task_stopped(task_id): break
         file_name = os.path.basename(file_path)
-        file_id = actual_file_ids[idx] if actual_file_ids else f"UNKNOWN_{idx}"
         
         cached_result = get_checkpoint(file_path)
         if cached_result:
-            safe_final_output = cached_result
-            cached_tokens = get_token_count(safe_final_output)
-            print(f"[缓存命中]: {file_name} 已存在本地提炼记录，恢复 {cached_tokens} Tokens。")
+            doc_states[idx] = {"status": "CACHED", "final_text": cached_result, "file_name": file_name, "file_path": file_path}
             final_feedback.append(f"{file_name} 命中本地提炼缓存。")
-        else:
-            try: 
-                text = read_local_file(file_path)
-                original_tokens = get_token_count(text)
+            continue
+            
+        try:
+            text = read_local_file(file_path)
+            original_tokens = get_token_count(text)
+            is_eng = detect_is_english(text, threshold=cfg.get("english_ratio_threshold", 0.5))
+            
+            actual_focus = cfg.get("map_focus_en") if is_eng else cfg.get("map_focus", "保持原意压缩...")
+            actual_reduce = cfg.get("reduce_rule_en") if is_eng else cfg.get("reduce_rule", "保持原意压缩...")
+            
+            chunks = semantic_chunk_text(text, max_tokens=cfg.get("max_chunk_tokens", 800), overlap_ratio=cfg.get("overlap_ratio", 0.1))
+            prompts = [build_slm_sequential_summary_prompt(chunk, i+1, len(chunks), actual_focus, is_eng) for i, chunk in enumerate(chunks)]
+            
+            print(f"[提取挂载]: {file_name} | {original_tokens} Tokens | 切片数: {len(chunks)}")
+            
+            doc_states[idx] = {
+                "status": "MAP",
+                "file_name": file_name,
+                "file_path": file_path,
+                "original_tokens": original_tokens,
+                "is_eng": is_eng,
+                "reduce_rule": actual_reduce,
+                "map_results": [None] * len(prompts),
+                "current_reduce_results": []
+            }
+            
+            for seq_idx, prompt in enumerate(prompts):
+                ready_queue.append((idx, "MAP", seq_idx, prompt))
                 
-                is_eng = detect_is_english(text, threshold=cfg.get("english_ratio_threshold", 0.5))
-                lang_label = "英文" if is_eng else "中文"
-                
-                actual_focus = cfg.get("map_focus_en") if is_eng else cfg.get("map_focus", "保持原意压缩...")
-                actual_reduce = cfg.get("reduce_rule_en") if is_eng else cfg.get("reduce_rule", "保持原意压缩...")
-                
-                print(f"[提炼启动]: {file_name} | 初始规模: {original_tokens} Tokens | 探测语言: {lang_label}")
-            except Exception as e: 
-                final_feedback.append(f"读取失败: {str(e)}")
-                continue
+        except Exception as e:
+            final_feedback.append(f"{file_name} 读取失败: {str(e)}")
+            doc_states[idx] = {"status": "ERROR"}
 
-            max_tokens = cfg.get("max_chunk_tokens", 800)
-            text_chunks = semantic_chunk_text(text, max_tokens=max_tokens, overlap_ratio=cfg.get("overlap_ratio", 0.1))
-            total_chunks = len(text_chunks)
+    # 🌟 2. 全局动态并发调度中心 (吃满并发)
+    while ready_queue:
+        if task_id and is_task_stopped(task_id):
+            return "执行中止: 用户已手动停止任务。"
             
-            all_prompts = [build_slm_sequential_summary_prompt(chunk, i+1, total_chunks, actual_focus, is_english=is_eng) for i, chunk in enumerate(text_chunks)]
-            all_responses = []
+        batch = ready_queue[:concurrency_limit]
+        ready_queue = ready_queue[concurrency_limit:]
+        
+        prompts_to_send = [item[3] for item in batch]
+        print(f"[SLM 并发调度] 正在发射 {len(prompts_to_send)} 个切片任务 (全局队列剩余: {len(ready_queue)})")
+        
+        results = slm_client.batch_generate(prompts_to_send, tracker=tracker)
+        
+        # 将结果分配回对应的文档状态中
+        for (doc_idx, stage, seq_idx, _), raw_res in zip(batch, results):
+            clean_res = clean_slm_output(raw_res)
+            state = doc_states[doc_idx]
             
-            print(f"[数据处理]: Map 阶段共 {total_chunks} 个切片并发压缩中...")
-            for i in range(0, len(all_prompts), concurrency_limit):
-                if task_id and is_task_stopped(task_id):
-                    return "执行中止: 用户已手动停止任务。"
+            # --- MAP 阶段结果回收 ---
+            if stage == "MAP":
+                state["map_results"][seq_idx] = clean_res
+                
+                # 如果该文档的所有 MAP 任务都已完成
+                if all(r is not None for r in state["map_results"]):
+                    current_reports = [r for r in state["map_results"] if r and r not in ["无", "None", "none", "NONE"]]
+                    massive_output = _sequential_assemble(current_reports, len(state["map_results"]))
+                    current_tokens = get_token_count(massive_output)
+                    print(f"✅ [{state['file_name']}] Map 阶段组装完成 -> 体积: {current_tokens} Tokens")
                     
-                batch = all_prompts[i : i + concurrency_limit]
-                all_responses.extend(slm_client.batch_generate(batch, tracker=tracker))
-
-            current_reports = [clean_slm_output(r) for r in all_responses]
-            current_massive_output = _sequential_assemble(current_reports, total_chunks)
-            stage_a_tokens = get_token_count(current_massive_output)
-            
-            ratio_a = (stage_a_tokens / original_tokens) * 100 if original_tokens > 0 else 0
-            print(f"[Map 阶段完成]: 压缩至 {stage_a_tokens} Tokens (留存率 {ratio_a:.1f}%)")
-            
-            if stage_a_tokens > llm_safe_window:
-                current_step = 1
-                slm_reduce_steps = cfg.get("slm_reduce_steps", 2)
-                while current_step <= slm_reduce_steps and len(current_reports) > 1:
-                    if task_id and is_task_stopped(task_id):
-                        return "执行中止: 用户已手动停止任务。"
+                    if current_tokens > llm_safe_window:
+                        # 触发 REDUCE 1 入队
+                        state["status"] = "REDUCE_1"
+                        grouped_prompts = []
+                        for i in range(0, len(current_reports), reduce_group_size):
+                            b_text = "\n\n".join([f"片段{j+1}:\n{b}" for j, b in enumerate(current_reports[i : i + reduce_group_size])])
+                            grouped_prompts.append(build_slm_reduce_prompt(b_text, state["reduce_rule"], 1, slm_reduce_steps_limit, state["is_eng"]))
+                            
+                        state["current_reduce_results"] = [None] * len(grouped_prompts)
+                        for sq, p in enumerate(grouped_prompts):
+                            ready_queue.append((doc_idx, "REDUCE_1", sq, p))
+                    else:
+                        state["status"] = "DONE_SLM"
+                        state["massive_output"] = massive_output
                         
-                    grouped_prompts = []
-                    for i in range(0, len(current_reports), reduce_group_size):
-                        batch = current_reports[i : i + reduce_group_size]
-                        batch_text = "\n\n".join([f"片段{j+1}:\n{b}" for j, b in enumerate(batch)])
-                        grouped_prompts.append(build_slm_reduce_prompt(batch_text, actual_reduce, current_step, slm_reduce_steps, is_english=is_eng))
-                        
-                    next_responses = slm_client.batch_generate(grouped_prompts, tracker=tracker)
-                    valid_responses = [clean_slm_output(r) for r in next_responses if len(clean_slm_output(r).strip()) > 5]
-                    if not valid_responses: break
-                        
-                    current_reports = valid_responses
-                    current_massive_output = _sequential_assemble(current_reports, len(current_reports))
-                    current_tokens = get_token_count(current_massive_output)
-                    
-                    ratio_b = (current_tokens / original_tokens) * 100 if original_tokens > 0 else 0
-                    print(f"[Reduce 阶段 {current_step} 完成]: 压缩至 {current_tokens} Tokens (留存率 {ratio_b:.1f}%)")
+            # --- REDUCE 阶段结果回收 ---
+            elif stage.startswith("REDUCE_"):
+                step = int(stage.split("_")[1])
+                state["current_reduce_results"][seq_idx] = clean_res
+                
+                # 如果当前层级的 REDUCE 任务全部完成
+                if all(r is not None for r in state["current_reduce_results"]):
+                    valid_reports = [r for r in state["current_reduce_results"] if len(r) > 5]
+                    massive_output = _sequential_assemble(valid_reports, len(valid_reports))
+                    current_tokens = get_token_count(massive_output)
+                    print(f"✅ [{state['file_name']}] Reduce {step} 组装完成 -> 体积: {current_tokens} Tokens")
                     
                     if enable_debug:
-                        with open(os.path.join(debug_dir, f"{file_name}_02_Reduce_Step{current_step}.md"), "w", encoding="utf-8") as f:
-                            f.write(f"# {file_name} - Reduce 阶段 {current_step} 输出\n\n{current_massive_output}")
+                        with open(os.path.join(debug_dir, f"{state['file_name']}_02_Reduce_Step{step}.md"), "w", encoding="utf-8") as f:
+                            f.write(f"# {state['file_name']} - Reduce 阶段 {step} 输出\n\n{massive_output}")
                     
-                    if current_tokens <= llm_safe_window: break
-                    current_step += 1
+                    if current_tokens > llm_safe_window and step < slm_reduce_steps_limit and len(valid_reports) > 1:
+                        # 触发下一级 REDUCE 入队
+                        next_step = step + 1
+                        state["status"] = f"REDUCE_{next_step}"
+                        grouped_prompts = []
+                        for i in range(0, len(valid_reports), reduce_group_size):
+                            b_text = "\n\n".join([f"片段{j+1}:\n{b}" for j, b in enumerate(valid_reports[i : i + reduce_group_size])])
+                            grouped_prompts.append(build_slm_reduce_prompt(b_text, state["reduce_rule"], next_step, slm_reduce_steps_limit, state["is_eng"]))
+                            
+                        state["current_reduce_results"] = [None] * len(grouped_prompts)
+                        for sq, p in enumerate(grouped_prompts):
+                            ready_queue.append((doc_idx, f"REDUCE_{next_step}", sq, p))
+                    else:
+                        state["status"] = "DONE_SLM"
+                        state["massive_output"] = massive_output
 
-            safe_final_output = llm_plan_execute_check_compression(current_massive_output, original_file_tokens=original_tokens, tracker=tracker)
-            
-            final_tokens = get_token_count(safe_final_output)
-            final_ratio = (final_tokens / original_tokens) * 100 if original_tokens > 0 else 0
-            print(f"[处理完成]: {file_name} 结构化去噪结束。最终提取事实共 {final_tokens} Tokens (压缩率: {final_ratio:.1f}%)")
-
+    # 🌟 3. 后处理落盘 (LLM 保底与状态写回)
+    for idx, state in doc_states.items():
+        if task_id and is_task_stopped(task_id): break
+        if state["status"] == "ERROR": continue
+        
+        file_name = state["file_name"]
+        file_path = state["file_path"]
+        file_id = actual_file_ids[idx] if actual_file_ids else f"UNKNOWN_{idx}"
+        
+        if state["status"] == "CACHED":
+            safe_final_output = state["final_text"]
+        else:
+            safe_final_output = llm_plan_execute_check_compression(state["massive_output"], original_file_tokens=state["original_tokens"], tracker=tracker)
             if enable_debug:
                 with open(os.path.join(debug_dir, f"{file_name}_03_Final.md"), "w", encoding="utf-8") as f:
                     f.write(f"# {file_name} - 最终存入系统记忆区的内容\n\n{safe_final_output}")
-
             save_checkpoint(file_path, safe_final_output)
+            final_feedback.append(f"{file_name} 全文提取完成，已载入系统记忆区。")
 
         if working_memory is not None:
             working_memory[f"Summary_{file_id}"] = safe_final_output
@@ -250,6 +295,4 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
                 final_tok_est = get_token_count(safe_final_output)
                 kwargs["agent_state"].memory_catalog[f"Summary_{file_id}"] = f"状态: 本地文件全文深度提炼完成 (后台物理留存 ~{final_tok_est} Tokens)"
             
-        final_feedback.append(f"{file_name} 全文提取完成，已载入系统记忆区。")
-
     return "\n".join(final_feedback)

@@ -25,11 +25,16 @@ def query_checkpoint_via_slm(file_paths: List[str] = None, query_instruction: st
     concurrency_limit = SLM_CONFIG.get("concurrency", 16)
     cat_tree = get_fs_category_tree()
     
-    for file_path in file_paths:
+    # 🌟 1. 铺平所有文件的并发任务队列
+    ready_queue = []
+    doc_states = {}
+    
+    for doc_idx, file_path in enumerate(file_paths):
         fname = os.path.basename(file_path)
         fname_no_ext = os.path.splitext(fname)[0]
         memory_text = ""
         
+        # 尝试从分类归档目录反向拉取
         for m_cat, subs in cat_tree.items():
             for s_cat, docs in subs.items():
                 for d in docs:
@@ -40,31 +45,48 @@ def query_checkpoint_via_slm(file_paths: List[str] = None, query_instruction: st
                         except: pass
                         break
         
-        if not memory_text:
-            memory_text = get_checkpoint(file_path)
+        # 若不在归档中，从缓存检查
+        if not memory_text: memory_text = get_checkpoint(file_path)
 
         if not memory_text:
             final_feedback.append(f"记忆区中未找到 {fname} 的记录，请先执行全文提炼。")
             continue
 
-        print(f"记忆检索启动: {fname} | 意图: {query_instruction}")
-        max_tokens = DATA_PIPELINE.get("max_chunk_tokens", 800)
-        chunks = semantic_chunk_text(memory_text, max_tokens=max_tokens, overlap_ratio=0.1)
-        
+        print(f"[记忆检索挂载]: {fname} | 意图: {query_instruction}")
+        chunks = semantic_chunk_text(memory_text, max_tokens=DATA_PIPELINE.get("max_chunk_tokens", 800), overlap_ratio=0.1)
         prompts = [build_slm_query_checkpoint_prompt(chunk, query_instruction) for chunk in chunks]
-        all_responses = []
-        for i in range(0, len(prompts), concurrency_limit):
-            batch = prompts[i:i+concurrency_limit]
-            all_responses.extend(slm_client.batch_generate(batch, tracker=tracker))
-            
-        valid_answers = [clean_slm_output(r) for r in all_responses if "未找到" not in clean_slm_output(r) and len(clean_slm_output(r)) > 5]
+        
+        doc_states[doc_idx] = {
+            "fname": fname,
+            "results": [None] * len(prompts)
+        }
+        
+        for seq_idx, prompt in enumerate(prompts):
+            ready_queue.append((doc_idx, seq_idx, prompt))
+
+    if not ready_queue:
+        return "\n\n".join(final_feedback) if final_feedback else "操作忽略，无可用数据块。"
+
+    # 🌟 2. 发射全局并发
+    for i in range(0, len(ready_queue), concurrency_limit):
+        batch = ready_queue[i : i + concurrency_limit]
+        prompts_to_send = [item[2] for item in batch]
+        
+        results = slm_client.batch_generate(prompts_to_send, tracker=tracker)
+        
+        for (doc_idx, seq_idx, _), raw_res in zip(batch, results):
+            doc_states[doc_idx]["results"][seq_idx] = clean_slm_output(raw_res)
+
+    # 🌟 3. 回收组装答案
+    for doc_idx, state in doc_states.items():
+        valid_answers = [r for r in state["results"] if r and "未找到" not in r and len(r) > 5]
+        
         if not valid_answers:
-            final_feedback.append(f"针对意图，未在 {fname} 记忆中发现相关内容。")
-            continue
-            
-        merged_answer = "\n\n---\n\n".join(valid_answers)
-        if len(merged_answer) > 2000:
-            merged_answer = merged_answer[:2000] + "\n...(内容过多已截断)..."
-        final_feedback.append(f"从 {fname} 提取结果:\n{merged_answer}")
+            final_feedback.append(f"针对意图，未在 {state['fname']} 记忆中发现相关内容。")
+        else:
+            merged_answer = "\n\n---\n\n".join(valid_answers)
+            if len(merged_answer) > 2000:
+                merged_answer = merged_answer[:2000] + "\n...(内容过多已截断)..."
+            final_feedback.append(f"从 {state['fname']} 提取结果:\n{merged_answer}")
 
     return "\n\n".join(final_feedback)
