@@ -68,6 +68,8 @@ def collect_history() -> list[dict[str, Any]]:
         if not result_dir.is_absolute():
             result_dir = PROJECT_DIR / result_dir
         jsonl_path, md_path = find_report_files(result_dir) if result_dir.exists() else (None, None)
+        
+        # ✨ 修改点：这里增加了 queued_at 字段
         items[task_id] = {
             "id": task_id,
             "title": task_id,
@@ -75,6 +77,7 @@ def collect_history() -> list[dict[str, Any]]:
             "status": record.get("status") or "ready",
             "progress": record.get("progress") or "",
             "updated_at": record.get("timestamp") or file_time(jsonl_path or md_path or OUTPUT_DIR),
+            "queued_at": record.get("queued_at") or "",
             "path": str(result_dir),
             "has_structured_report": bool(jsonl_path),
         }
@@ -94,6 +97,7 @@ def collect_history() -> list[dict[str, Any]]:
                 "status": "ready",
                 "progress": "",
                 "updated_at": file_time(jsonl_path or md_path or child),
+                "queued_at": "",
                 "path": str(child),
                 "has_structured_report": bool(jsonl_path),
             },
@@ -111,6 +115,7 @@ def collect_history() -> list[dict[str, Any]]:
                 "status": "ready",
                 "progress": "",
                 "updated_at": file_time(root_jsonl or root_md or OUTPUT_DIR),
+                "queued_at": "",
                 "path": str(OUTPUT_DIR),
                 "has_structured_report": bool(root_jsonl),
             },
@@ -167,7 +172,6 @@ def structured_report(report_id: str) -> dict[str, Any]:
         "markdown": markdown,
     }
 
-# 🔴 改动：将 query 合并进入 target
 def proxy_api(path: str, query: str, method: str, body: bytes | None = None) -> tuple[int, bytes, str]:
     full_path = f"{path}?{query}" if query else path
     target = urllib.parse.urljoin(API_BASE_URL, full_path)
@@ -231,7 +235,6 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else b"{}"
             
-            # 特殊处理 multipart/form-data 类型 (上传文件场景)
             content_type = self.headers.get("Content-Type", "application/json")
             full_path = f"{parsed.path}?{parsed.query}" if parsed.query else parsed.path
             target = urllib.parse.urljoin(API_BASE_URL, full_path)

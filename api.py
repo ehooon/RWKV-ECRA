@@ -27,6 +27,7 @@ class AnalyzeRequest(BaseModel):
     llm_provider: Optional[str] = None
     slm_endpoint: Optional[str] = None
     slm_password: Optional[str] = None
+    queued_at: Optional[str] = None  # ✨ 新增：接收前端点击发送时的排队时间
 
 # =====================================
 # 2. 基础系统接口 (上传与清理)
@@ -38,21 +39,15 @@ async def upload_files(files: List[UploadFile] = File(...), paths: List[str] = F
     saved_files = []
     
     for i, file in enumerate(files):
-        # 兼容处理带层级的相对路径
         rel_path = paths[i] if paths and i < len(paths) else file.filename
         safe_path = os.path.normpath(rel_path).replace("\\", "/")
-        
-        # 拦截跨目录穿越攻击
         if safe_path.startswith("..") or safe_path.startswith("/"):
             continue
-            
         file_location = os.path.join(input_dir, safe_path)
         os.makedirs(os.path.dirname(file_location), exist_ok=True)
-        
         with open(file_location, "wb+") as file_object:
             shutil.copyfileobj(file.file, file_object)
         saved_files.append(safe_path)
-        
     return {"code": 200, "message": "上传成功", "data": {"saved": saved_files}}
 
 @app.post("/api/v1/cleanup")
@@ -63,7 +58,6 @@ def cleanup_environment():
         config.DATA_PIPELINE["checkpoint_directory"],
         config.DATA_PIPELINE.get("debug_directory", "./data/debug_slm")
     ]
-    
     for directory in dirs_to_clean:
         if os.path.exists(directory):
             for filename in os.listdir(directory):
@@ -86,13 +80,11 @@ def list_input_files():
     input_dir = config.DATA_PIPELINE["input_directory"]
     files = []
     if os.path.exists(input_dir):
-        # 递归遍历所有文件夹与子文件
         for root, _, filenames in os.walk(input_dir):
             for f in filenames:
                 if not f.startswith("."):
                     full_path = os.path.join(root, f)
                     rel_path = os.path.relpath(full_path, input_dir)
-                    # 统一为前端返回正斜杠路径
                     files.append(rel_path.replace("\\", "/"))
     return {"code": 200, "data": files}
 
@@ -101,14 +93,11 @@ def list_input_files():
 def delete_input_file(path: str):
     input_dir = config.DATA_PIPELINE["input_directory"]
     safe_path = os.path.normpath(path).replace("\\", "/")
-    
     if safe_path.startswith("..") or safe_path.startswith("/"):
         return {"code": 403, "message": "非法路径"}
-        
     file_path = os.path.join(input_dir, safe_path)
     if os.path.exists(file_path):
         os.remove(file_path)
-        # 尝试顺手清理空文件夹
         dir_name = os.path.dirname(file_path)
         try:
             if not os.listdir(dir_name) and dir_name != input_dir:
@@ -123,21 +112,15 @@ def delete_input_file(path: str):
 def get_input_file(path: str):
     input_dir = config.DATA_PIPELINE["input_directory"]
     safe_path = os.path.normpath(path).replace("\\", "/")
-    
     if safe_path.startswith("..") or safe_path.startswith("/"):
         return PlainTextResponse("Invalid path", status_code=403)
-        
     file_path = os.path.join(input_dir, safe_path)
-    
     if os.path.exists(file_path):
         ext = os.path.splitext(file_path)[1].lower()
-        # 若是图片资源则直接作为文件流返回
         if ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']:
             return FileResponse(file_path)
-            
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             return PlainTextResponse(f.read())
-            
     return PlainTextResponse("File not found", status_code=404)
 
 # =====================================
@@ -171,7 +154,8 @@ def analyze_endpoint(req: AnalyzeRequest, bg_tasks: BackgroundTasks):
     task_id = f"TASK_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     task_output_dir = os.path.join(config.DATA_PIPELINE["output_directory"], task_id)
     
-    record_task(task_id, req.query, "running", task_output_dir)
+    # ✨ 这里透传 queued_at
+    record_task(task_id, req.query, "running", task_output_dir, queued_at=req.queued_at)
     bg_tasks.add_task(background_analyze, task_id, req, task_output_dir)
     
     return {

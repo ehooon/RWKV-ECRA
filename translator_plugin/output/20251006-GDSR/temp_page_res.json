@@ -1,0 +1,2955 @@
+{
+    "input_path": "output_results/20251006-GDSR/temp_page.jpg",
+    "page_index": null,
+    "page_count": null,
+    "width": 2550,
+    "height": 3300,
+    "model_settings": {
+        "use_doc_preprocessor": true,
+        "use_layout_detection": true,
+        "use_chart_recognition": false,
+        "use_seal_recognition": false,
+        "use_ocr_for_image_block": false,
+        "format_block_content": false,
+        "merge_layout_blocks": true,
+        "markdown_ignore_labels": [
+            "number",
+            "footnote",
+            "header",
+            "header_image",
+            "footer",
+            "footer_image",
+            "aside_text"
+        ],
+        "return_layout_polygon_points": true
+    },
+    "parsing_res_list": [
+        {
+            "block_label": "header",
+            "block_content": "JOURNAL OF LATEX CLASS FILES, VOL. 14, NO. 8, AUGUST 2021",
+            "block_bbox": [
+                32,
+                10,
+                1039,
+                73
+            ],
+            "block_id": 0,
+            "block_order": null,
+            "group_id": 0,
+            "block_polygon_points": [
+                [
+                    32.0,
+                    10.0
+                ],
+                [
+                    1039.0,
+                    10.0
+                ],
+                [
+                    1039.0,
+                    73.0
+                ],
+                [
+                    32.0,
+                    73.0
+                ]
+            ]
+        },
+        {
+            "block_label": "number",
+            "block_content": "15",
+            "block_bbox": [
+                2473,
+                0,
+                2518,
+                33
+            ],
+            "block_id": 1,
+            "block_order": null,
+            "group_id": 1,
+            "block_polygon_points": [
+                [
+                    2473.0,
+                    0.0
+                ],
+                [
+                    2517.0,
+                    0.0
+                ],
+                [
+                    2517.0,
+                    32.0
+                ],
+                [
+                    2473.0,
+                    32.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[13] X. Chen, X. Wang, J. Zhou, Y. Qiao, and C. Dong, “Activating more pixels in image super-resolution transformer,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), June 2023, pp. 22367–22377.",
+            "block_bbox": [
+                27,
+                165,
+                1248,
+                338
+            ],
+            "block_id": 2,
+            "block_order": 1,
+            "group_id": 2,
+            "block_polygon_points": [
+                [
+                    27.0,
+                    165.0
+                ],
+                [
+                    1248.0,
+                    165.0
+                ],
+                [
+                    1248.0,
+                    338.0
+                ],
+                [
+                    27.0,
+                    338.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[14] L. Gao, H. Liu, M. Yang, L. Chen, Y. Wan, Z. Xiao, and Y. Qian, \"Stransfuse: Fusing swin transformer and convolutional neural network for remote sensing image semantic segmentation,\" IEEE journal of selected topics in applied earth observations and remote sensing, vol. 14, pp. 10990–11003, 2021.",
+            "block_bbox": [
+                26,
+                328,
+                1246,
+                532
+            ],
+            "block_id": 3,
+            "block_order": 2,
+            "group_id": 3,
+            "block_polygon_points": [
+                [
+                    26.0,
+                    328.0
+                ],
+                [
+                    1246.0,
+                    328.0
+                ],
+                [
+                    1246.0,
+                    532.0
+                ],
+                [
+                    26.0,
+                    532.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[15] H. Guo, J. Li, T. Dai, Z. Ouyang, X. Ren, and S.-T. Xia, “Mambair: A simple baseline for image restoration with state-space model,” in European Conference on Computer Vision. Springer, 2025, pp. 222–241.",
+            "block_bbox": [
+                24,
+                529,
+                1241,
+                691
+            ],
+            "block_id": 4,
+            "block_order": 3,
+            "group_id": 4,
+            "block_polygon_points": [
+                [
+                    24.0,
+                    529.0
+                ],
+                [
+                    1241.0,
+                    529.0
+                ],
+                [
+                    1241.0,
+                    691.0
+                ],
+                [
+                    24.0,
+                    691.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[16] Y. Xiao, Q. Yuan, K. Jiang, Y. Chen, Q. Zhang, and C.-W. Lin, \"Frequency-assisted mamba for remote sensing image super-resolution,\" IEEE Transactions on Multimedia, vol. 26, pp. 1–14, 2024.",
+            "block_bbox": [
+                24,
+                686,
+                1238,
+                810
+            ],
+            "block_id": 5,
+            "block_order": 4,
+            "group_id": 5,
+            "block_polygon_points": [
+                [
+                    24.0,
+                    686.0
+                ],
+                [
+                    1238.0,
+                    686.0
+                ],
+                [
+                    1238.0,
+                    810.0
+                ],
+                [
+                    24.0,
+                    810.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[17] A. Gu and T. Dao, \"Mamba: Linear-time sequence modeling with selective state spaces,\" arXiv preprint arXiv:2312.00752, 2023.",
+            "block_bbox": [
+                24,
+                806,
+                1237,
+                890
+            ],
+            "block_id": 6,
+            "block_order": 5,
+            "group_id": 6,
+            "block_polygon_points": [
+                [
+                    24.0,
+                    806.0
+                ],
+                [
+                    1237.0,
+                    806.0
+                ],
+                [
+                    1237.0,
+                    890.0
+                ],
+                [
+                    24.0,
+                    890.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[18] B. Peng, D. Goldstein, Q. Anthony, A. Albalak, E. Alcaide, S. Biderman, E. Cheah, X. Du, T. Ferdinan, H. Hou et al., “Eagle and finch: Rwkv with matrix-valued states and dynamic recurrence,” arXiv preprint arXiv:2404.05892, 2024.",
+            "block_bbox": [
+                23,
+                885,
+                1237,
+                1044
+            ],
+            "block_id": 7,
+            "block_order": 6,
+            "group_id": 7,
+            "block_polygon_points": [
+                [
+                    23.0,
+                    885.0
+                ],
+                [
+                    1237.0,
+                    885.0
+                ],
+                [
+                    1237.0,
+                    1044.0
+                ],
+                [
+                    23.0,
+                    1044.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[19] H. Yuan, X. Li, L. Qi, T. Zhang, M.-H. Yang, S. Yan, and C. C. Loy, \"Mamba or rwkv: Exploring high-quality and high-efficiency segment anything model,\" arXiv preprint arXiv:2406.19369, 2024.",
+            "block_bbox": [
+                21,
+                1039,
+                1236,
+                1161
+            ],
+            "block_id": 8,
+            "block_order": 7,
+            "group_id": 8,
+            "block_polygon_points": [
+                [
+                    21.0,
+                    1039.0
+                ],
+                [
+                    1236.0,
+                    1039.0
+                ],
+                [
+                    1236.0,
+                    1161.0
+                ],
+                [
+                    21.0,
+                    1161.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[20] Z. Yang, H. Zhang, D. Zhao, B. Wei, and Y. Xu, “Restore-rwkv: Efficient and effective medical image restoration with rwkv,” arXiv preprint arXiv:2407.11087, 2024.",
+            "block_bbox": [
+                18,
+                1156,
+                1236,
+                1279
+            ],
+            "block_id": 9,
+            "block_order": 8,
+            "group_id": 9,
+            "block_polygon_points": [
+                [
+                    18.0,
+                    1156.0
+                ],
+                [
+                    1236.0,
+                    1156.0
+                ],
+                [
+                    1236.0,
+                    1279.0
+                ],
+                [
+                    18.0,
+                    1279.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[21] N. Park and S. Kim, \"How do vision transformers work?\" in International Conference on Learning Representations, 2022.",
+            "block_bbox": [
+                19,
+                1276,
+                1233,
+                1360
+            ],
+            "block_id": 10,
+            "block_order": 9,
+            "group_id": 10,
+            "block_polygon_points": [
+                [
+                    19.0,
+                    1276.0
+                ],
+                [
+                    1233.0,
+                    1276.0
+                ],
+                [
+                    1233.0,
+                    1360.0
+                ],
+                [
+                    19.0,
+                    1360.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[23] X. Dong, X. Sun, X. Jia, Z. Xi, L. Gao, and B. Zhang, “Remote sensing image super-resolution using novel dense-sampling networks,” IEEE Transactions on Geoscience and Remote Sensing, vol. 59, no. 2, pp. 1618–1633, 2020.",
+            "block_bbox": [
+                14,
+                1513,
+                1232,
+                1675
+            ],
+            "block_id": 11,
+            "block_order": 10,
+            "group_id": 11,
+            "block_polygon_points": [
+                [
+                    14.0,
+                    1513.0
+                ],
+                [
+                    1232.0,
+                    1513.0
+                ],
+                [
+                    1232.0,
+                    1675.0
+                ],
+                [
+                    14.0,
+                    1675.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[22] Z. Pan, W. Ma, J. Guo, and B. Lei, “Super-resolution of single remote sensing image based on residual dense backprojection networks,” IEEE Transactions on Geoscience and Remote Sensing, vol. 57, no. 10, pp. 7918–7933, 2019.",
+            "block_bbox": [
+                17,
+                1356,
+                1234,
+                1517
+            ],
+            "block_id": 12,
+            "block_order": 11,
+            "group_id": 12,
+            "block_polygon_points": [
+                [
+                    17.0,
+                    1356.0
+                ],
+                [
+                    1234.0,
+                    1356.0
+                ],
+                [
+                    1234.0,
+                    1517.0
+                ],
+                [
+                    17.0,
+                    1517.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[24] S. Lei and Z. Shi, “Hybrid-scale self-similarity exploitation for remote sensing image super-resolution,” IEEE Transactions on Geoscience and Remote Sensing, vol. 60, pp. 1–10, 2021.",
+            "block_bbox": [
+                12,
+                1671,
+                1234,
+                1794
+            ],
+            "block_id": 13,
+            "block_order": 12,
+            "group_id": 13,
+            "block_polygon_points": [
+                [
+                    10.8292236328125,
+                    1686.6690673828125
+                ],
+                [
+                    1233.0001220703125,
+                    1671.0001220703125
+                ],
+                [
+                    1234.3717041015625,
+                    1777.9825439453125
+                ],
+                [
+                    12.2008056640625,
+                    1793.6514892578125
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[26] Y. Long, X. Wang, M. Xu, S. Zhang, S. Jiang, and S. Jia, “Dual self-attention swin transformer for hyperspectral image super-resolution,” IEEE Transactions on Geoscience and Remote Sensing, vol. 61, pp. 1–12, 2023.",
+            "block_bbox": [
+                8,
+                1942,
+                1231,
+                2099
+            ],
+            "block_id": 14,
+            "block_order": 13,
+            "group_id": 14,
+            "block_polygon_points": [
+                [
+                    8.0,
+                    1942.0
+                ],
+                [
+                    1231.0,
+                    1942.0
+                ],
+                [
+                    1231.0,
+                    2099.0
+                ],
+                [
+                    8.0,
+                    2099.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[25] J. Wang, B. Wang, X. Wang, Y. Zhao, and T. Long, “Hybrid attention-based u-shaped network for remote sensing image super-resolution,” IEEE Transactions on Geoscience and Remote Sensing, vol. 61, pp. 1–15, 2023.",
+            "block_bbox": [
+                10,
+                1790,
+                1233,
+                1945
+            ],
+            "block_id": 15,
+            "block_order": 14,
+            "group_id": 15,
+            "block_polygon_points": [
+                [
+                    10.0,
+                    1790.0
+                ],
+                [
+                    1233.0,
+                    1790.0
+                ],
+                [
+                    1233.0,
+                    1945.0
+                ],
+                [
+                    10.0,
+                    1945.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[27] J. Hao, W. Li, Y. Lu, Y. Jin, Y. Zhao, S. Wang, and B. Wang, “Scale-aware backprojection transformer for single remote sensing image super-resolution,” IEEE Transactions on Geoscience and Remote Sensing, vol. 62, pp. 1–13, 2024.",
+            "block_bbox": [
+                10,
+                2095,
+                1230,
+                2257
+            ],
+            "block_id": 16,
+            "block_order": 15,
+            "group_id": 16,
+            "block_polygon_points": [
+                [
+                    10.0,
+                    2095.0
+                ],
+                [
+                    1230.0,
+                    2095.0
+                ],
+                [
+                    1230.0,
+                    2257.0
+                ],
+                [
+                    10.0,
+                    2257.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[28] J. Li, Y. Meng, C. Tao, Z. Zhang, X. Yang, Z. Wang, X. Wang, L. Li, and W. Zhang, “Convformers: Fusing transformers and convolutional neural networks for cross-sensor remote sensing imagery super-resolution,” IEEE Transactions on Geoscience and Remote Sensing, vol. 62, pp. 1–15, 2024.",
+            "block_bbox": [
+                11,
+                2254,
+                1229,
+                2452
+            ],
+            "block_id": 17,
+            "block_order": 16,
+            "group_id": 17,
+            "block_polygon_points": [
+                [
+                    11.0,
+                    2254.0
+                ],
+                [
+                    1229.0,
+                    2254.0
+                ],
+                [
+                    1229.0,
+                    2452.0
+                ],
+                [
+                    11.0,
+                    2452.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[29] H. Xiao, X. Chen, L. Luo, and C. Lin, “A dual-path feature reuse multi-scale network for remote sensing image super-resolution,” The Journal of Supercomputing, vol. 81, no. 1, pp. 1–28, 2025.",
+            "block_bbox": [
+                13,
+                2448,
+                1228,
+                2570
+            ],
+            "block_id": 18,
+            "block_order": 17,
+            "group_id": 18,
+            "block_polygon_points": [
+                [
+                    13.0,
+                    2448.0
+                ],
+                [
+                    13.0,
+                    2539.0
+                ],
+                [
+                    26.0,
+                    2554.0
+                ],
+                [
+                    525.0,
+                    2569.0
+                ],
+                [
+                    1189.0,
+                    2569.0
+                ],
+                [
+                    1227.0,
+                    2554.0
+                ],
+                [
+                    1227.0,
+                    2464.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[30] A. Hajian and S. Aramvittn, \"Aeru-net: Adaptive edge recovery and attention u-shaped network for remote sensing image super-resolution,\" IEEE Access, vol. 13, pp. 59 177–59 197, 2025.",
+            "block_bbox": [
+                15,
+                2565,
+                1228,
+                2685
+            ],
+            "block_id": 19,
+            "block_order": 18,
+            "group_id": 19,
+            "block_polygon_points": [
+                [
+                    15.0,
+                    2580.0
+                ],
+                [
+                    28.0,
+                    2669.0
+                ],
+                [
+                    1227.0,
+                    2684.0
+                ],
+                [
+                    1227.0,
+                    2580.0
+                ],
+                [
+                    462.0,
+                    2580.0
+                ],
+                [
+                    461.0,
+                    2565.0
+                ],
+                [
+                    437.0,
+                    2565.0
+                ],
+                [
+                    410.0,
+                    2565.0
+                ],
+                [
+                    28.0,
+                    2565.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[31] Y. Kang, X. Zhang, S. Wang, and G. Jin, “Scat: Shift channel attention transformer for remote sensing image super-resolution,” IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing, vol. 18, pp. 10337–10347, 2025.",
+            "block_bbox": [
+                15,
+                2681,
+                1226,
+                2842
+            ],
+            "block_id": 20,
+            "block_order": 19,
+            "group_id": 20,
+            "block_polygon_points": [
+                [
+                    15.0,
+                    2681.0
+                ],
+                [
+                    1226.0,
+                    2681.0
+                ],
+                [
+                    1226.0,
+                    2842.0
+                ],
+                [
+                    15.0,
+                    2842.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[32] B. Peng, E. Alcaide, Q. Anthony, A. Albalak, S. Arcadinho, S. Biderman, H. Cao, X. Cheng, M. Chung, M. Grella et al., “Rwkv: Reinventing rnns for the transformer era,” arXiv preprint arXiv:2305.13048, 2023.",
+            "block_bbox": [
+                16,
+                2837,
+                1223,
+                2957
+            ],
+            "block_id": 21,
+            "block_order": 20,
+            "group_id": 21,
+            "block_polygon_points": [
+                [
+                    16.0,
+                    2837.0
+                ],
+                [
+                    1223.0,
+                    2837.0
+                ],
+                [
+                    1223.0,
+                    2957.0
+                ],
+                [
+                    16.0,
+                    2957.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[33] Y. Duan, W. Wang, Z. Chen, X. Zhu, L. Lu, T. Lu, Y. Qiao, H. Li, J. Dai, and W. Wang, “Vision-RWKV: Efficient and scalable visual perception with RWKV-like architectures,” in The Thirteenth International Conference on Learning Representations, 2025.",
+            "block_bbox": [
+                20,
+                2952,
+                1226,
+                3109
+            ],
+            "block_id": 22,
+            "block_order": 21,
+            "group_id": 22,
+            "block_polygon_points": [
+                [
+                    20.0,
+                    2952.0
+                ],
+                [
+                    1226.0,
+                    2952.0
+                ],
+                [
+                    1226.0,
+                    3109.0
+                ],
+                [
+                    20.0,
+                    3109.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[34] Z. Fei, M. Fan, C. Yu, D. Li, and J. Huang, \"Diffusion-rwkv: Scaling rwkv-like architectures for diffusion models,\" arXiv preprint arXiv:2404.04478, 2024.",
+            "block_bbox": [
+                1291,
+                160,
+                2508,
+                300
+            ],
+            "block_id": 23,
+            "block_order": 22,
+            "group_id": 23,
+            "block_polygon_points": [
+                [
+                    1289.209228515625,
+                    178.026611328125
+                ],
+                [
+                    2506.999755859375,
+                    159.99990844726562
+                ],
+                [
+                    2508.990478515625,
+                    294.47039794921875
+                ],
+                [
+                    1291.199951171875,
+                    312.4971008300781
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[35] I. Daubechies, “Ten lectures on wavelets,” Society for industrial and applied mathematics, 1992.",
+            "block_bbox": [
+                1289,
+                283,
+                2506,
+                374
+            ],
+            "block_id": 24,
+            "block_order": 23,
+            "group_id": 24,
+            "block_polygon_points": [
+                [
+                    2505.0,
+                    283.0
+                ],
+                [
+                    2253.0,
+                    283.0
+                ],
+                [
+                    2252.0,
+                    299.0
+                ],
+                [
+                    1289.0,
+                    299.0
+                ],
+                [
+                    1289.0,
+                    373.0
+                ],
+                [
+                    2505.0,
+                    358.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[36] H. Huang, R. He, Z. Sun, and T. Tan, “Wavelet-srnet: A wavelet-based cnn for multi-scale face super resolution,” in Proceedings of the IEEE international conference on computer vision, 2017, pp. 1689–1697.",
+            "block_bbox": [
+                1288,
+                361,
+                2499,
+                492
+            ],
+            "block_id": 25,
+            "block_order": 24,
+            "group_id": 25,
+            "block_polygon_points": [
+                [
+                    1288.0,
+                    361.0
+                ],
+                [
+                    2499.0,
+                    361.0
+                ],
+                [
+                    2499.0,
+                    492.0
+                ],
+                [
+                    1288.0,
+                    492.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[37] X. Deng, R. Yang, M. Xu, and P. L. Dragotti, “Wavelet domain style transfer for an effective perception-distortion tradeoff in single image super-resolution,” in Proceedings of the IEEE/CVF international conference on computer vision, 2019, pp. 3076–3085.",
+            "block_bbox": [
+                1285,
+                482,
+                2496,
+                649
+            ],
+            "block_id": 26,
+            "block_order": 25,
+            "group_id": 26,
+            "block_polygon_points": [
+                [
+                    1285.0,
+                    482.0
+                ],
+                [
+                    2496.0,
+                    482.0
+                ],
+                [
+                    2496.0,
+                    649.0
+                ],
+                [
+                    1285.0,
+                    649.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[38] J. Xin, J. Li, X. Jiang, N. Wang, H. Huang, and X. Gao, “Wavelet-based dual recursive network for image super-resolution,” IEEE Transactions on Neural Networks and Learning Systems, vol. 33, no. 2, pp. 707–720, 2022.",
+            "block_bbox": [
+                1286,
+                643,
+                2491,
+                802
+            ],
+            "block_id": 27,
+            "block_order": 26,
+            "group_id": 27,
+            "block_polygon_points": [
+                [
+                    1286.0,
+                    643.0
+                ],
+                [
+                    2491.0,
+                    643.0
+                ],
+                [
+                    2491.0,
+                    802.0
+                ],
+                [
+                    1286.0,
+                    802.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[39] S. E. Finder, R. Amoyal, E. Treister, and O. Freifeld, “Wavelet convolutions for large receptive fields,” in European Conference on Computer Vision. Springer, 2025, pp. 363–380.",
+            "block_bbox": [
+                1283,
+                801,
+                2486,
+                923
+            ],
+            "block_id": 28,
+            "block_order": 27,
+            "group_id": 28,
+            "block_polygon_points": [
+                [
+                    1283.0,
+                    801.0
+                ],
+                [
+                    2486.0,
+                    801.0
+                ],
+                [
+                    2486.0,
+                    923.0
+                ],
+                [
+                    1283.0,
+                    923.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[40] C. Korkmaz, A. M. Tekalp, and Z. Dogan, “Training generative image super-resolution models by wavelet-domain losses enables better control of artifacts,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, 2024, pp. 5926–5936.",
+            "block_bbox": [
+                1281,
+                922,
+                2483,
+                1080
+            ],
+            "block_id": 29,
+            "block_order": 28,
+            "group_id": 29,
+            "block_polygon_points": [
+                [
+                    1281.0,
+                    922.0
+                ],
+                [
+                    2483.0,
+                    922.0
+                ],
+                [
+                    2483.0,
+                    1080.0
+                ],
+                [
+                    1281.0,
+                    1080.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[41] C. Korkmaz and A. M. Tekalp, “Training transformer models by wavelet losses improves quantitative and visual performance in single image super-resolution,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, 2024, pp. 6661–6670.",
+            "block_bbox": [
+                1278,
+                1079,
+                2480,
+                1240
+            ],
+            "block_id": 30,
+            "block_order": 29,
+            "group_id": 30,
+            "block_polygon_points": [
+                [
+                    1278.0,
+                    1079.0
+                ],
+                [
+                    2480.0,
+                    1079.0
+                ],
+                [
+                    2480.0,
+                    1240.0
+                ],
+                [
+                    1278.0,
+                    1240.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[42] W. Shi, J. Caballero, F. Huszár, J. Totz, A. P. Aitken, R. Bishop, D. Rueckert, and Z. Wang, “Real-time single image and video super-resolution using an efficient sub-pixel convolutional neural network,” in Proceedings of the IEEE conference on computer vision and pattern recognition, 2016, pp. 1874–1883.",
+            "block_bbox": [
+                1279,
+                1234,
+                2474,
+                1433
+            ],
+            "block_id": 31,
+            "block_order": 30,
+            "group_id": 31,
+            "block_polygon_points": [
+                [
+                    1279.0,
+                    1234.0
+                ],
+                [
+                    2474.0,
+                    1234.0
+                ],
+                [
+                    2474.0,
+                    1433.0
+                ],
+                [
+                    1279.0,
+                    1433.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[43] S. Woo, J. Park, J.-Y. Lee, and I. S. Kweon, “Cbam: Convolutional block attention module,” in Proceedings of the European conference on computer vision (ECCV), 2018, pp. 3–19.",
+            "block_bbox": [
+                1276,
+                1430,
+                2472,
+                1552
+            ],
+            "block_id": 32,
+            "block_order": 31,
+            "group_id": 32,
+            "block_polygon_points": [
+                [
+                    1276.0,
+                    1430.0
+                ],
+                [
+                    2472.0,
+                    1430.0
+                ],
+                [
+                    2472.0,
+                    1552.0
+                ],
+                [
+                    1276.0,
+                    1552.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[44] G.-S. Xia, J. Hu, F. Hu, B. Shi, X. Bai, Y. Zhong, L. Zhang, and X. Lu, \"Aid: A benchmark data set for performance evaluation of aerial scene classification,\" IEEE Transactions on Geoscience and Remote Sensing, vol. 55, no. 7, pp. 3965–3981, 2017.",
+            "block_bbox": [
+                1277,
+                1549,
+                2472,
+                1711
+            ],
+            "block_id": 33,
+            "block_order": 32,
+            "group_id": 33,
+            "block_polygon_points": [
+                [
+                    1277.0,
+                    1549.0
+                ],
+                [
+                    2472.0,
+                    1549.0
+                ],
+                [
+                    2472.0,
+                    1711.0
+                ],
+                [
+                    1277.0,
+                    1711.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[45] Y. Yang and S. Newsam, “Bag-of-visual-words and spatial extensions for land-use classification,” in Proceedings of the 18th SIGSPATIAL international conference on advances in geographic information systems, 2010, pp. 270–279.",
+            "block_bbox": [
+                1278,
+                1708,
+                2472,
+                1868
+            ],
+            "block_id": 34,
+            "block_order": 33,
+            "group_id": 34,
+            "block_polygon_points": [
+                [
+                    1278.0,
+                    1708.0
+                ],
+                [
+                    2472.0,
+                    1708.0
+                ],
+                [
+                    2472.0,
+                    1868.0
+                ],
+                [
+                    1278.0,
+                    1868.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[46] Z. Wang, A. Bovik, H. Sheikh, and E. Simoncelli, “Image quality assessment: from error visibility to structural similarity,” IEEE Transactions on Image Processing, vol. 13, no. 4, pp. 600–612, 2004.",
+            "block_bbox": [
+                1276,
+                1864,
+                2471,
+                1988
+            ],
+            "block_id": 35,
+            "block_order": 34,
+            "group_id": 35,
+            "block_polygon_points": [
+                [
+                    1276.0,
+                    1864.0
+                ],
+                [
+                    2471.0,
+                    1864.0
+                ],
+                [
+                    2471.0,
+                    1988.0
+                ],
+                [
+                    1276.0,
+                    1988.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[47] R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang, “The unreasonable effectiveness of deep features as a perceptual metric,” in Proceedings of the IEEE conference on computer vision and pattern recognition, 2018, pp. 586–595.",
+            "block_bbox": [
+                1276,
+                1983,
+                2472,
+                2141
+            ],
+            "block_id": 36,
+            "block_order": 35,
+            "group_id": 36,
+            "block_polygon_points": [
+                [
+                    1276.0,
+                    1983.0
+                ],
+                [
+                    2472.0,
+                    1983.0
+                ],
+                [
+                    2472.0,
+                    2141.0
+                ],
+                [
+                    1276.0,
+                    2141.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[48] A. Krizhevsky, I. Sutskever, and G. E. Hinton, “Imagenet classification with deep convolutional neural networks,” Advances in neural information processing systems, vol. 25, 2012.",
+            "block_bbox": [
+                1275,
+                2137,
+                2470,
+                2261
+            ],
+            "block_id": 37,
+            "block_order": 36,
+            "group_id": 37,
+            "block_polygon_points": [
+                [
+                    1275.0,
+                    2137.0
+                ],
+                [
+                    2470.0,
+                    2137.0
+                ],
+                [
+                    2470.0,
+                    2261.0
+                ],
+                [
+                    1275.0,
+                    2261.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[49] J. Gu, H. Lu, W. Zuo, and C. Dong, “Blind super-resolution with iterative kernel correction,” in Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, 2019, pp. 1604–1613.",
+            "block_bbox": [
+                1273,
+                2257,
+                2474,
+                2383
+            ],
+            "block_id": 38,
+            "block_order": 37,
+            "group_id": 38,
+            "block_polygon_points": [
+                [
+                    1273.0,
+                    2257.0
+                ],
+                [
+                    2474.0,
+                    2257.0
+                ],
+                [
+                    2474.0,
+                    2383.0
+                ],
+                [
+                    1273.0,
+                    2383.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[50] X. Wang, L. Xie, C. Dong, and Y. Shan, “Real-esrgan: Training real-world blind super-resolution with pure synthetic data,” in Proceedings of the IEEE/CVF international conference on computer vision, 2021, pp. 1905–1914.",
+            "block_bbox": [
+                1271,
+                2376,
+                2472,
+                2539
+            ],
+            "block_id": 39,
+            "block_order": 38,
+            "group_id": 39,
+            "block_polygon_points": [
+                [
+                    1271.0,
+                    2376.0
+                ],
+                [
+                    1271.0,
+                    2522.0
+                ],
+                [
+                    2471.0,
+                    2538.0
+                ],
+                [
+                    2471.0,
+                    2393.0
+                ],
+                [
+                    2420.0,
+                    2376.0
+                ],
+                [
+                    2408.0,
+                    2393.0
+                ],
+                [
+                    2344.0,
+                    2376.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[51] R. Dong, L. Mou, L. Zhang, H. Fu, and X. X. Zhu, “Real-world remote sensing image super-resolution via a practical degradation model and a kernel-aware network,” ISPRS Journal of Photogrammetry and Remote Sensing, vol. 191, pp. 155–170, 2022.",
+            "block_bbox": [
+                1269,
+                2531,
+                2475,
+                2702
+            ],
+            "block_id": 40,
+            "block_order": 39,
+            "group_id": 40,
+            "block_polygon_points": [
+                [
+                    1269.0,
+                    2531.0
+                ],
+                [
+                    1269.0,
+                    2686.0
+                ],
+                [
+                    2474.0,
+                    2701.0
+                ],
+                [
+                    2474.0,
+                    2547.0
+                ],
+                [
+                    1565.0,
+                    2547.0
+                ],
+                [
+                    1564.0,
+                    2531.0
+                ],
+                [
+                    1538.0,
+                    2531.0
+                ],
+                [
+                    1500.0,
+                    2531.0
+                ],
+                [
+                    1435.0,
+                    2531.0
+                ],
+                [
+                    1359.0,
+                    2531.0
+                ],
+                [
+                    1345.0,
+                    2531.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[52] R. Dong, S. Yuan, B. Luo, M. Chen, J. Zhang, L. Zhang, W. Li, J. Zheng, and H. Fu, “Building bridges across spatial and temporal resolutions: Reference-based super-resolution via change priors and conditional diffusion model,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, 2024, pp. 27 684–27 694.",
+            "block_bbox": [
+                1269,
+                2688,
+                2475,
+                2906
+            ],
+            "block_id": 41,
+            "block_order": 40,
+            "group_id": 41,
+            "block_polygon_points": [
+                [
+                    1269.0,
+                    2688.0
+                ],
+                [
+                    1269.0,
+                    2889.0
+                ],
+                [
+                    2474.0,
+                    2905.0
+                ],
+                [
+                    2474.0,
+                    2705.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[53] J. Gu and C. Dong, “Interpreting super-resolution networks with local attribution maps,” in Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. 2021. pp. 9199–9208",
+            "block_bbox": [
+                1269,
+                2885,
+                2477,
+                3028
+            ],
+            "block_id": 42,
+            "block_order": 41,
+            "group_id": 42,
+            "block_polygon_points": [
+                [
+                    1269.0,
+                    2885.0
+                ],
+                [
+                    1269.0,
+                    2980.0
+                ],
+                [
+                    1334.0,
+                    2996.0
+                ],
+                [
+                    2476.0,
+                    3012.0
+                ],
+                [
+                    2476.0,
+                    2901.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[54] Y. Blau, R. Mechrez, R. Timofte, T. Michaeli, and L. Zelnik-Manor, \"The 2018 pirm challenge on perceptual image super-resolution,\" in Proceedings of the European conference on computer vision (ECCV) workshops, 2018, pp. 0–0.",
+            "block_bbox": [
+                1267,
+                2999,
+                2478,
+                3172
+            ],
+            "block_id": 43,
+            "block_order": 42,
+            "group_id": 43,
+            "block_polygon_points": [
+                [
+                    1267.0,
+                    2999.0
+                ],
+                [
+                    2478.0,
+                    2999.0
+                ],
+                [
+                    2478.0,
+                    3172.0
+                ],
+                [
+                    1267.0,
+                    3172.0
+                ]
+            ]
+        }
+    ],
+    "doc_preprocessor_res": {
+        "input_path": null,
+        "page_index": null,
+        "model_settings": {
+            "use_doc_orientation_classify": true,
+            "use_doc_unwarping": true
+        },
+        "angle": 0
+    },
+    "layout_det_res": {
+        "input_path": null,
+        "page_index": null,
+        "boxes": [
+            {
+                "cls_id": 12,
+                "label": "header",
+                "score": 0.8936702013015747,
+                "coordinate": [
+                    32,
+                    10,
+                    1039,
+                    73
+                ],
+                "order": null,
+                "polygon_points": [
+                    [
+                        32.0,
+                        10.0
+                    ],
+                    [
+                        1039.0,
+                        10.0
+                    ],
+                    [
+                        1039.0,
+                        73.0
+                    ],
+                    [
+                        32.0,
+                        73.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 16,
+                "label": "number",
+                "score": 0.7187051177024841,
+                "coordinate": [
+                    2473,
+                    0,
+                    2518,
+                    33
+                ],
+                "order": 1,
+                "polygon_points": [
+                    [
+                        2473.0,
+                        0.0
+                    ],
+                    [
+                        2517.0,
+                        0.0
+                    ],
+                    [
+                        2517.0,
+                        32.0
+                    ],
+                    [
+                        2473.0,
+                        32.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 18,
+                "label": "reference",
+                "score": 0.9544472098350525,
+                "coordinate": [
+                    6,
+                    169,
+                    1241,
+                    3115
+                ],
+                "order": 2,
+                "polygon_points": [
+                    [
+                        6.0,
+                        169.0
+                    ],
+                    [
+                        1241.0,
+                        169.0
+                    ],
+                    [
+                        1241.0,
+                        3115.0
+                    ],
+                    [
+                        6.0,
+                        3115.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9554561376571655,
+                "coordinate": [
+                    27,
+                    165,
+                    1248,
+                    338
+                ],
+                "order": 3,
+                "polygon_points": [
+                    [
+                        27.0,
+                        165.0
+                    ],
+                    [
+                        1248.0,
+                        165.0
+                    ],
+                    [
+                        1248.0,
+                        338.0
+                    ],
+                    [
+                        27.0,
+                        338.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9630685448646545,
+                "coordinate": [
+                    26,
+                    328,
+                    1246,
+                    532
+                ],
+                "order": 4,
+                "polygon_points": [
+                    [
+                        26.0,
+                        328.0
+                    ],
+                    [
+                        1246.0,
+                        328.0
+                    ],
+                    [
+                        1246.0,
+                        532.0
+                    ],
+                    [
+                        26.0,
+                        532.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9463799595832825,
+                "coordinate": [
+                    24,
+                    529,
+                    1241,
+                    691
+                ],
+                "order": 5,
+                "polygon_points": [
+                    [
+                        24.0,
+                        529.0
+                    ],
+                    [
+                        1241.0,
+                        529.0
+                    ],
+                    [
+                        1241.0,
+                        691.0
+                    ],
+                    [
+                        24.0,
+                        691.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9199873208999634,
+                "coordinate": [
+                    24,
+                    686,
+                    1238,
+                    810
+                ],
+                "order": 6,
+                "polygon_points": [
+                    [
+                        24.0,
+                        686.0
+                    ],
+                    [
+                        1238.0,
+                        686.0
+                    ],
+                    [
+                        1238.0,
+                        810.0
+                    ],
+                    [
+                        24.0,
+                        810.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9127893447875977,
+                "coordinate": [
+                    24,
+                    806,
+                    1237,
+                    890
+                ],
+                "order": 7,
+                "polygon_points": [
+                    [
+                        24.0,
+                        806.0
+                    ],
+                    [
+                        1237.0,
+                        806.0
+                    ],
+                    [
+                        1237.0,
+                        890.0
+                    ],
+                    [
+                        24.0,
+                        890.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9416078329086304,
+                "coordinate": [
+                    23,
+                    885,
+                    1237,
+                    1044
+                ],
+                "order": 8,
+                "polygon_points": [
+                    [
+                        23.0,
+                        885.0
+                    ],
+                    [
+                        1237.0,
+                        885.0
+                    ],
+                    [
+                        1237.0,
+                        1044.0
+                    ],
+                    [
+                        23.0,
+                        1044.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.927804708480835,
+                "coordinate": [
+                    21,
+                    1039,
+                    1236,
+                    1161
+                ],
+                "order": 9,
+                "polygon_points": [
+                    [
+                        21.0,
+                        1039.0
+                    ],
+                    [
+                        1236.0,
+                        1039.0
+                    ],
+                    [
+                        1236.0,
+                        1161.0
+                    ],
+                    [
+                        21.0,
+                        1161.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9418946504592896,
+                "coordinate": [
+                    18,
+                    1156,
+                    1236,
+                    1279
+                ],
+                "order": 10,
+                "polygon_points": [
+                    [
+                        18.0,
+                        1156.0
+                    ],
+                    [
+                        1236.0,
+                        1156.0
+                    ],
+                    [
+                        1236.0,
+                        1279.0
+                    ],
+                    [
+                        18.0,
+                        1279.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9273607134819031,
+                "coordinate": [
+                    19,
+                    1276,
+                    1233,
+                    1360
+                ],
+                "order": 11,
+                "polygon_points": [
+                    [
+                        19.0,
+                        1276.0
+                    ],
+                    [
+                        1233.0,
+                        1276.0
+                    ],
+                    [
+                        1233.0,
+                        1360.0
+                    ],
+                    [
+                        19.0,
+                        1360.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9561111927032471,
+                "coordinate": [
+                    14,
+                    1513,
+                    1232,
+                    1675
+                ],
+                "order": 12,
+                "polygon_points": [
+                    [
+                        14.0,
+                        1513.0
+                    ],
+                    [
+                        1232.0,
+                        1513.0
+                    ],
+                    [
+                        1232.0,
+                        1675.0
+                    ],
+                    [
+                        14.0,
+                        1675.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9518089294433594,
+                "coordinate": [
+                    17,
+                    1356,
+                    1234,
+                    1517
+                ],
+                "order": 13,
+                "polygon_points": [
+                    [
+                        17.0,
+                        1356.0
+                    ],
+                    [
+                        1234.0,
+                        1356.0
+                    ],
+                    [
+                        1234.0,
+                        1517.0
+                    ],
+                    [
+                        17.0,
+                        1517.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9459741115570068,
+                "coordinate": [
+                    12,
+                    1671,
+                    1234,
+                    1794
+                ],
+                "order": 14,
+                "polygon_points": [
+                    [
+                        10.8292236328125,
+                        1686.6690673828125
+                    ],
+                    [
+                        1233.0001220703125,
+                        1671.0001220703125
+                    ],
+                    [
+                        1234.3717041015625,
+                        1777.9825439453125
+                    ],
+                    [
+                        12.2008056640625,
+                        1793.6514892578125
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9446516633033752,
+                "coordinate": [
+                    8,
+                    1942,
+                    1231,
+                    2099
+                ],
+                "order": 15,
+                "polygon_points": [
+                    [
+                        8.0,
+                        1942.0
+                    ],
+                    [
+                        1231.0,
+                        1942.0
+                    ],
+                    [
+                        1231.0,
+                        2099.0
+                    ],
+                    [
+                        8.0,
+                        2099.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.949903666973114,
+                "coordinate": [
+                    10,
+                    1790,
+                    1233,
+                    1945
+                ],
+                "order": 16,
+                "polygon_points": [
+                    [
+                        10.0,
+                        1790.0
+                    ],
+                    [
+                        1233.0,
+                        1790.0
+                    ],
+                    [
+                        1233.0,
+                        1945.0
+                    ],
+                    [
+                        10.0,
+                        1945.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9420298337936401,
+                "coordinate": [
+                    10,
+                    2095,
+                    1230,
+                    2257
+                ],
+                "order": 17,
+                "polygon_points": [
+                    [
+                        10.0,
+                        2095.0
+                    ],
+                    [
+                        1230.0,
+                        2095.0
+                    ],
+                    [
+                        1230.0,
+                        2257.0
+                    ],
+                    [
+                        10.0,
+                        2257.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9427204132080078,
+                "coordinate": [
+                    11,
+                    2254,
+                    1229,
+                    2452
+                ],
+                "order": 18,
+                "polygon_points": [
+                    [
+                        11.0,
+                        2254.0
+                    ],
+                    [
+                        1229.0,
+                        2254.0
+                    ],
+                    [
+                        1229.0,
+                        2452.0
+                    ],
+                    [
+                        11.0,
+                        2452.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9290079474449158,
+                "coordinate": [
+                    13,
+                    2448,
+                    1228,
+                    2570
+                ],
+                "order": 19,
+                "polygon_points": [
+                    [
+                        13.0,
+                        2448.0
+                    ],
+                    [
+                        13.0,
+                        2539.0
+                    ],
+                    [
+                        26.0,
+                        2554.0
+                    ],
+                    [
+                        525.0,
+                        2569.0
+                    ],
+                    [
+                        1189.0,
+                        2569.0
+                    ],
+                    [
+                        1227.0,
+                        2554.0
+                    ],
+                    [
+                        1227.0,
+                        2464.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9266839623451233,
+                "coordinate": [
+                    15,
+                    2565,
+                    1228,
+                    2685
+                ],
+                "order": 20,
+                "polygon_points": [
+                    [
+                        15.0,
+                        2580.0
+                    ],
+                    [
+                        28.0,
+                        2669.0
+                    ],
+                    [
+                        1227.0,
+                        2684.0
+                    ],
+                    [
+                        1227.0,
+                        2580.0
+                    ],
+                    [
+                        462.0,
+                        2580.0
+                    ],
+                    [
+                        461.0,
+                        2565.0
+                    ],
+                    [
+                        437.0,
+                        2565.0
+                    ],
+                    [
+                        410.0,
+                        2565.0
+                    ],
+                    [
+                        28.0,
+                        2565.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9467609524726868,
+                "coordinate": [
+                    15,
+                    2681,
+                    1226,
+                    2842
+                ],
+                "order": 21,
+                "polygon_points": [
+                    [
+                        15.0,
+                        2681.0
+                    ],
+                    [
+                        1226.0,
+                        2681.0
+                    ],
+                    [
+                        1226.0,
+                        2842.0
+                    ],
+                    [
+                        15.0,
+                        2842.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9413604736328125,
+                "coordinate": [
+                    16,
+                    2837,
+                    1223,
+                    2957
+                ],
+                "order": 22,
+                "polygon_points": [
+                    [
+                        16.0,
+                        2837.0
+                    ],
+                    [
+                        1223.0,
+                        2837.0
+                    ],
+                    [
+                        1223.0,
+                        2957.0
+                    ],
+                    [
+                        16.0,
+                        2957.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 18,
+                "label": "reference",
+                "score": 0.9577832818031311,
+                "coordinate": [
+                    1274,
+                    144,
+                    2488,
+                    3161
+                ],
+                "order": 23,
+                "polygon_points": [
+                    [
+                        1274.0,
+                        144.0
+                    ],
+                    [
+                        2488.0,
+                        144.0
+                    ],
+                    [
+                        2488.0,
+                        3161.0
+                    ],
+                    [
+                        1274.0,
+                        3161.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.954858660697937,
+                "coordinate": [
+                    20,
+                    2952,
+                    1226,
+                    3109
+                ],
+                "order": 24,
+                "polygon_points": [
+                    [
+                        20.0,
+                        2952.0
+                    ],
+                    [
+                        1226.0,
+                        2952.0
+                    ],
+                    [
+                        1226.0,
+                        3109.0
+                    ],
+                    [
+                        20.0,
+                        3109.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9484528303146362,
+                "coordinate": [
+                    1291,
+                    160,
+                    2508,
+                    300
+                ],
+                "order": 25,
+                "polygon_points": [
+                    [
+                        1289.209228515625,
+                        178.026611328125
+                    ],
+                    [
+                        2506.999755859375,
+                        159.99990844726562
+                    ],
+                    [
+                        2508.990478515625,
+                        294.47039794921875
+                    ],
+                    [
+                        1291.199951171875,
+                        312.4971008300781
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9342887997627258,
+                "coordinate": [
+                    1289,
+                    283,
+                    2506,
+                    374
+                ],
+                "order": 26,
+                "polygon_points": [
+                    [
+                        2505.0,
+                        283.0
+                    ],
+                    [
+                        2253.0,
+                        283.0
+                    ],
+                    [
+                        2252.0,
+                        299.0
+                    ],
+                    [
+                        1289.0,
+                        299.0
+                    ],
+                    [
+                        1289.0,
+                        373.0
+                    ],
+                    [
+                        2505.0,
+                        358.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9453652501106262,
+                "coordinate": [
+                    1288,
+                    361,
+                    2499,
+                    492
+                ],
+                "order": 27,
+                "polygon_points": [
+                    [
+                        1288.0,
+                        361.0
+                    ],
+                    [
+                        2499.0,
+                        361.0
+                    ],
+                    [
+                        2499.0,
+                        492.0
+                    ],
+                    [
+                        1288.0,
+                        492.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9428101181983948,
+                "coordinate": [
+                    1285,
+                    482,
+                    2496,
+                    649
+                ],
+                "order": 28,
+                "polygon_points": [
+                    [
+                        1285.0,
+                        482.0
+                    ],
+                    [
+                        2496.0,
+                        482.0
+                    ],
+                    [
+                        2496.0,
+                        649.0
+                    ],
+                    [
+                        1285.0,
+                        649.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9290914535522461,
+                "coordinate": [
+                    1286,
+                    643,
+                    2491,
+                    802
+                ],
+                "order": 29,
+                "polygon_points": [
+                    [
+                        1286.0,
+                        643.0
+                    ],
+                    [
+                        2491.0,
+                        643.0
+                    ],
+                    [
+                        2491.0,
+                        802.0
+                    ],
+                    [
+                        1286.0,
+                        802.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9241342544555664,
+                "coordinate": [
+                    1283,
+                    801,
+                    2486,
+                    923
+                ],
+                "order": 30,
+                "polygon_points": [
+                    [
+                        1283.0,
+                        801.0
+                    ],
+                    [
+                        2486.0,
+                        801.0
+                    ],
+                    [
+                        2486.0,
+                        923.0
+                    ],
+                    [
+                        1283.0,
+                        923.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9388412833213806,
+                "coordinate": [
+                    1281,
+                    922,
+                    2483,
+                    1080
+                ],
+                "order": 31,
+                "polygon_points": [
+                    [
+                        1281.0,
+                        922.0
+                    ],
+                    [
+                        2483.0,
+                        922.0
+                    ],
+                    [
+                        2483.0,
+                        1080.0
+                    ],
+                    [
+                        1281.0,
+                        1080.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.935487687587738,
+                "coordinate": [
+                    1278,
+                    1079,
+                    2480,
+                    1240
+                ],
+                "order": 32,
+                "polygon_points": [
+                    [
+                        1278.0,
+                        1079.0
+                    ],
+                    [
+                        2480.0,
+                        1079.0
+                    ],
+                    [
+                        2480.0,
+                        1240.0
+                    ],
+                    [
+                        1278.0,
+                        1240.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9559214115142822,
+                "coordinate": [
+                    1279,
+                    1234,
+                    2474,
+                    1433
+                ],
+                "order": 33,
+                "polygon_points": [
+                    [
+                        1279.0,
+                        1234.0
+                    ],
+                    [
+                        2474.0,
+                        1234.0
+                    ],
+                    [
+                        2474.0,
+                        1433.0
+                    ],
+                    [
+                        1279.0,
+                        1433.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9498164653778076,
+                "coordinate": [
+                    1276,
+                    1430,
+                    2472,
+                    1552
+                ],
+                "order": 34,
+                "polygon_points": [
+                    [
+                        1276.0,
+                        1430.0
+                    ],
+                    [
+                        2472.0,
+                        1430.0
+                    ],
+                    [
+                        2472.0,
+                        1552.0
+                    ],
+                    [
+                        1276.0,
+                        1552.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9595094323158264,
+                "coordinate": [
+                    1277,
+                    1549,
+                    2472,
+                    1711
+                ],
+                "order": 35,
+                "polygon_points": [
+                    [
+                        1277.0,
+                        1549.0
+                    ],
+                    [
+                        2472.0,
+                        1549.0
+                    ],
+                    [
+                        2472.0,
+                        1711.0
+                    ],
+                    [
+                        1277.0,
+                        1711.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9555296301841736,
+                "coordinate": [
+                    1278,
+                    1708,
+                    2472,
+                    1868
+                ],
+                "order": 36,
+                "polygon_points": [
+                    [
+                        1278.0,
+                        1708.0
+                    ],
+                    [
+                        2472.0,
+                        1708.0
+                    ],
+                    [
+                        2472.0,
+                        1868.0
+                    ],
+                    [
+                        1278.0,
+                        1868.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9428863525390625,
+                "coordinate": [
+                    1276,
+                    1864,
+                    2471,
+                    1988
+                ],
+                "order": 37,
+                "polygon_points": [
+                    [
+                        1276.0,
+                        1864.0
+                    ],
+                    [
+                        2471.0,
+                        1864.0
+                    ],
+                    [
+                        2471.0,
+                        1988.0
+                    ],
+                    [
+                        1276.0,
+                        1988.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9466614127159119,
+                "coordinate": [
+                    1276,
+                    1983,
+                    2472,
+                    2141
+                ],
+                "order": 38,
+                "polygon_points": [
+                    [
+                        1276.0,
+                        1983.0
+                    ],
+                    [
+                        2472.0,
+                        1983.0
+                    ],
+                    [
+                        2472.0,
+                        2141.0
+                    ],
+                    [
+                        1276.0,
+                        2141.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9250063896179199,
+                "coordinate": [
+                    1275,
+                    2137,
+                    2470,
+                    2261
+                ],
+                "order": 39,
+                "polygon_points": [
+                    [
+                        1275.0,
+                        2137.0
+                    ],
+                    [
+                        2470.0,
+                        2137.0
+                    ],
+                    [
+                        2470.0,
+                        2261.0
+                    ],
+                    [
+                        1275.0,
+                        2261.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.919712245464325,
+                "coordinate": [
+                    1273,
+                    2257,
+                    2474,
+                    2383
+                ],
+                "order": 40,
+                "polygon_points": [
+                    [
+                        1273.0,
+                        2257.0
+                    ],
+                    [
+                        2474.0,
+                        2257.0
+                    ],
+                    [
+                        2474.0,
+                        2383.0
+                    ],
+                    [
+                        1273.0,
+                        2383.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9357098340988159,
+                "coordinate": [
+                    1271,
+                    2376,
+                    2472,
+                    2539
+                ],
+                "order": 41,
+                "polygon_points": [
+                    [
+                        1271.0,
+                        2376.0
+                    ],
+                    [
+                        1271.0,
+                        2522.0
+                    ],
+                    [
+                        2471.0,
+                        2538.0
+                    ],
+                    [
+                        2471.0,
+                        2393.0
+                    ],
+                    [
+                        2420.0,
+                        2376.0
+                    ],
+                    [
+                        2408.0,
+                        2393.0
+                    ],
+                    [
+                        2344.0,
+                        2376.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9356354475021362,
+                "coordinate": [
+                    1269,
+                    2531,
+                    2475,
+                    2702
+                ],
+                "order": 42,
+                "polygon_points": [
+                    [
+                        1269.0,
+                        2531.0
+                    ],
+                    [
+                        1269.0,
+                        2686.0
+                    ],
+                    [
+                        2474.0,
+                        2701.0
+                    ],
+                    [
+                        2474.0,
+                        2547.0
+                    ],
+                    [
+                        1565.0,
+                        2547.0
+                    ],
+                    [
+                        1564.0,
+                        2531.0
+                    ],
+                    [
+                        1538.0,
+                        2531.0
+                    ],
+                    [
+                        1500.0,
+                        2531.0
+                    ],
+                    [
+                        1435.0,
+                        2531.0
+                    ],
+                    [
+                        1359.0,
+                        2531.0
+                    ],
+                    [
+                        1345.0,
+                        2531.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9486603736877441,
+                "coordinate": [
+                    1269,
+                    2688,
+                    2475,
+                    2906
+                ],
+                "order": 43,
+                "polygon_points": [
+                    [
+                        1269.0,
+                        2688.0
+                    ],
+                    [
+                        1269.0,
+                        2889.0
+                    ],
+                    [
+                        2474.0,
+                        2905.0
+                    ],
+                    [
+                        2474.0,
+                        2705.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.942726731300354,
+                "coordinate": [
+                    1269,
+                    2885,
+                    2477,
+                    3028
+                ],
+                "order": 44,
+                "polygon_points": [
+                    [
+                        1269.0,
+                        2885.0
+                    ],
+                    [
+                        1269.0,
+                        2980.0
+                    ],
+                    [
+                        1334.0,
+                        2996.0
+                    ],
+                    [
+                        2476.0,
+                        3012.0
+                    ],
+                    [
+                        2476.0,
+                        2901.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9377358555793762,
+                "coordinate": [
+                    1267,
+                    2999,
+                    2478,
+                    3172
+                ],
+                "order": 45,
+                "polygon_points": [
+                    [
+                        1267.0,
+                        2999.0
+                    ],
+                    [
+                        2478.0,
+                        2999.0
+                    ],
+                    [
+                        2478.0,
+                        3172.0
+                    ],
+                    [
+                        1267.0,
+                        3172.0
+                    ]
+                ]
+            }
+        ]
+    }
+}

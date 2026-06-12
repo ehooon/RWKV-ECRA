@@ -32,7 +32,6 @@ class TaskStore:
                         else:
                             self._task_index[tid].update(record)
                         
-                        # 墓碑清除：如果在重载时发现处于删除状态，彻底脱离内存
                         if self._task_index[tid].get('status') == 'deleted':
                             if tid in self._ordered_keys:
                                 self._ordered_keys.remove(tid)
@@ -40,7 +39,7 @@ class TaskStore:
                 except json.JSONDecodeError:
                     continue
 
-    def record_task(self, task_id: str, query: str, status: str, result_dir: str = "", error: str = ""):
+    def record_task(self, task_id: str, query: str, status: str, result_dir: str = "", error: str = "", queued_at: str = None):
         with self._lock:
             os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
             record = {
@@ -52,10 +51,17 @@ class TaskStore:
                 "error": error
             }
             
+            # ✨ 新增：保存排队时间
+            if queued_at: 
+                record["queued_at"] = queued_at
+                
             if task_id not in self._task_index:
                 self._ordered_keys.append(task_id)
                 self._task_index[task_id] = record
             else:
+                # ✨ 新增：保证任务更新进度时，已有的 queued_at 不会丢失
+                if "queued_at" not in record and "queued_at" in self._task_index[task_id]:
+                    record["queued_at"] = self._task_index[task_id]["queued_at"]
                 self._task_index[task_id].update(record)
             
             with open(self.filepath, "a", encoding="utf-8") as f:
@@ -82,7 +88,6 @@ class TaskStore:
                 with open(self.filepath, "a", encoding="utf-8") as f:
                     f.write(json.dumps(self._task_index[task_id], ensure_ascii=False) + "\n")
                 
-                # 物理删除专属报告文件夹，释放硬盘空间
                 task_dir = self._task_index[task_id].get("result_dir")
                 if task_dir and os.path.exists(task_dir):
                     import shutil
@@ -91,7 +96,6 @@ class TaskStore:
                     except Exception:
                         pass
                 
-                # 抹除内存
                 if task_id in self._ordered_keys:
                     self._ordered_keys.remove(task_id)
                 del self._task_index[task_id]
@@ -100,7 +104,7 @@ class TaskStore:
         with self._lock:
             task = self._task_index.get(task_id)
             if not task:
-                return True # 不存在也直接熔断退出
+                return True
             return task.get('status') in ('stopped', 'deleted')
 
     def get_all_tasks(self) -> list:
@@ -117,8 +121,8 @@ def _get_store() -> TaskStore:
 def init_task_file():
     _get_store()
 
-def record_task(task_id: str, query: str, status: str, result_dir: str = "", error: str = ""):
-    _get_store().record_task(task_id, query, status, result_dir, error)
+def record_task(task_id: str, query: str, status: str, result_dir: str = "", error: str = "", queued_at: str = None):
+    _get_store().record_task(task_id, query, status, result_dir, error, queued_at)
 
 def update_task_progress(task_id: str, progress: str):
     _get_store().update_task_progress(task_id, progress)

@@ -1,0 +1,1373 @@
+{
+    "input_path": "output_results/20251209-FRWKV/temp_page.jpg",
+    "page_index": null,
+    "page_count": null,
+    "width": 2550,
+    "height": 3300,
+    "model_settings": {
+        "use_doc_preprocessor": true,
+        "use_layout_detection": true,
+        "use_chart_recognition": false,
+        "use_seal_recognition": false,
+        "use_ocr_for_image_block": false,
+        "format_block_content": false,
+        "merge_layout_blocks": true,
+        "markdown_ignore_labels": [
+            "number",
+            "footnote",
+            "header",
+            "header_image",
+            "footer",
+            "footer_image",
+            "aside_text"
+        ],
+        "return_layout_polygon_points": true
+    },
+    "parsing_res_list": [
+        {
+            "block_label": "header",
+            "block_content": "A PREPRINT - DECEMBER 10, 2025",
+            "block_bbox": [
+                1659,
+                18,
+                2358,
+                80
+            ],
+            "block_id": 0,
+            "block_order": null,
+            "group_id": 0,
+            "block_polygon_points": [
+                [
+                    1659.0,
+                    18.0
+                ],
+                [
+                    2358.0,
+                    18.0
+                ],
+                [
+                    2358.0,
+                    80.0
+                ],
+                [
+                    1659.0,
+                    80.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[6] Tsungnan Lin, Bill G Horne, Peter Tino, and C Lee Giles. Learning long-term dependencies in NARX recurrent neural networks. IEEE Transactions on Neural Networks, 7(6):1329–1338, 1996.",
+            "block_bbox": [
+                207,
+                224,
+                2345,
+                347
+            ],
+            "block_id": 1,
+            "block_order": 1,
+            "group_id": 1,
+            "block_polygon_points": [
+                [
+                    207.0,
+                    224.0
+                ],
+                [
+                    2345.0,
+                    224.0
+                ],
+                [
+                    2345.0,
+                    347.0
+                ],
+                [
+                    207.0,
+                    347.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[7] Boris N Oreshkin, Dmitri Carpov, Nicolas Chapados, and Yoshua Bengio. N-BEATS: Neural basis expansion analysis for interpretable time series forecasting. arXiv preprint arXiv:1905.10437, 2019.",
+            "block_bbox": [
+                216,
+                352,
+                2341,
+                478
+            ],
+            "block_id": 2,
+            "block_order": 2,
+            "group_id": 2,
+            "block_polygon_points": [
+                [
+                    215.22317504882812,
+                    367.0055236816406
+                ],
+                [
+                    2340.0,
+                    352.0000305175781
+                ],
+                [
+                    2340.77685546875,
+                    461.9945373535156
+                ],
+                [
+                    216.0,
+                    477.0000305175781
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[8] Yao Qin, Dongjin Song, Haifeng Chen, Wei Cheng, Guofei Jiang, and Garrison Cottrell. A dual-stage attention-based recurrent neural network for time series prediction. arXiv preprint arXiv:1704.02971, 2017.",
+            "block_bbox": [
+                227,
+                481,
+                2342,
+                608
+            ],
+            "block_id": 3,
+            "block_order": 3,
+            "group_id": 3,
+            "block_polygon_points": [
+                [
+                    226.21266174316406,
+                    496.005615234375
+                ],
+                [
+                    2341.000244140625,
+                    481.0
+                ],
+                [
+                    2341.787841796875,
+                    591.994384765625
+                ],
+                [
+                    227.000244140625,
+                    607.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[9] David Salinas, Valentin Flunkert, Jan Gasthaus, and Tim Januschowski. DeepER: Probabilistic forecasting with autoregressive recurrent networks. International Journal of Forecasting, 36(3):1181–1191, 2020.",
+            "block_bbox": [
+                235,
+                605,
+                2331,
+                743
+            ],
+            "block_id": 4,
+            "block_order": 4,
+            "group_id": 4,
+            "block_polygon_points": [
+                [
+                    234.02621459960938,
+                    622.0079956054688
+                ],
+                [
+                    2330.00048828125,
+                    605.0000610351562
+                ],
+                [
+                    2330.97412109375,
+                    724.9921264648438
+                ],
+                [
+                    234.999755859375,
+                    742.0000610351562
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[10] Yuqi Nie, Nam H. Nguyen, Phanwadee Sinthong, and Jayant Kalagnanam. A time series is worth 64 words: Long-term forecasting with transformers. In ICLR, 2023.",
+            "block_bbox": [
+                227,
+                732,
+                2332,
+                870
+            ],
+            "block_id": 5,
+            "block_order": 5,
+            "group_id": 5,
+            "block_polygon_points": [
+                [
+                    2331.0,
+                    732.0
+                ],
+                [
+                    227.0,
+                    763.0
+                ],
+                [
+                    227.0,
+                    869.0
+                ],
+                [
+                    2331.0,
+                    839.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[11] Haixu Wu, Tengge Hu, Yong Liu, Hang Zhou, Jianmin Wang, and Mingsheng Long. TimesNet: Temporal 2D-variation modeling for general time series analysis. In ICLR, 2023.",
+            "block_bbox": [
+                231,
+                850,
+                2330,
+                991
+            ],
+            "block_id": 6,
+            "block_order": 6,
+            "group_id": 6,
+            "block_polygon_points": [
+                [
+                    231.0,
+                    886.0
+                ],
+                [
+                    231.0,
+                    990.0
+                ],
+                [
+                    2329.0,
+                    955.0
+                ],
+                [
+                    2329.0,
+                    850.0
+                ],
+                [
+                    1173.0,
+                    850.0
+                ],
+                [
+                    1172.0,
+                    868.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[12] Yong Liu, Tengge Hu, Haoran Zhang, Haixu Wu, Shiyu Wang, Lintao Ma, and Mingsheng Long. iTransformer: Inverted transformers are effective for time series forecasting. In ICLR, 2024.",
+            "block_bbox": [
+                241,
+                973,
+                2333,
+                1105
+            ],
+            "block_id": 7,
+            "block_order": 7,
+            "group_id": 7,
+            "block_polygon_points": [
+                [
+                    2332.0,
+                    973.0
+                ],
+                [
+                    241.0,
+                    1006.0
+                ],
+                [
+                    241.0,
+                    1104.0
+                ],
+                [
+                    2179.0,
+                    1088.0
+                ],
+                [
+                    2332.0,
+                    1071.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[13] Krzysztof Choromanski et al. Rethinking attention with Performers. arXiv preprint arXiv:2009.14794, 2020.",
+            "block_bbox": [
+                242,
+                1088,
+                2278,
+                1176
+            ],
+            "block_id": 8,
+            "block_order": 8,
+            "group_id": 8,
+            "block_polygon_points": [
+                [
+                    2277.0,
+                    1088.0
+                ],
+                [
+                    242.0,
+                    1124.0
+                ],
+                [
+                    242.0,
+                    1175.0
+                ],
+                [
+                    2125.0,
+                    1158.0
+                ],
+                [
+                    2277.0,
+                    1140.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[14] Bo Peng et al. RWKV: Reinventing RNNs for the transformer era. 2023.",
+            "block_bbox": [
+                241,
+                1164,
+                1630,
+                1243
+            ],
+            "block_id": 9,
+            "block_order": 9,
+            "group_id": 9,
+            "block_polygon_points": [
+                [
+                    241.0,
+                    1184.0
+                ],
+                [
+                    241.0,
+                    1242.0
+                ],
+                [
+                    1629.0,
+                    1223.0
+                ],
+                [
+                    1629.0,
+                    1164.0
+                ],
+                [
+                    649.0,
+                    1164.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[15] Bo Peng et al. RWKV-7 \"Goose\" with expressive dynamic state evolution. 2025.",
+            "block_bbox": [
+                242,
+                1230,
+                1778,
+                1311
+            ],
+            "block_id": 10,
+            "block_order": 10,
+            "group_id": 10,
+            "block_polygon_points": [
+                [
+                    242.0,
+                    1251.0
+                ],
+                [
+                    242.0,
+                    1310.0
+                ],
+                [
+                    1777.0,
+                    1290.0
+                ],
+                [
+                    1777.0,
+                    1230.0
+                ],
+                [
+                    626.0,
+                    1230.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[16] Haowen Hou and F Richard Yu. RWKV-TS: Beyond traditional recurrent neural network for time series tasks. arXiv preprint arXiv:2401.09093, 2024.",
+            "block_bbox": [
+                243,
+                1290,
+                2333,
+                1422
+            ],
+            "block_id": 11,
+            "block_order": 11,
+            "group_id": 11,
+            "block_polygon_points": [
+                [
+                    2332.0,
+                    1290.0
+                ],
+                [
+                    243.0,
+                    1323.0
+                ],
+                [
+                    243.0,
+                    1421.0
+                ],
+                [
+                    2294.0,
+                    1405.0
+                ],
+                [
+                    2332.0,
+                    1388.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[17] Wenzhen Yue et al. Freeformer: Frequency enhanced transformer for multivariate time series forecasting. arXiv preprint arXiv:2501.13989, 2025.",
+            "block_bbox": [
+                243,
+                1409,
+                2331,
+                1541
+            ],
+            "block_id": 12,
+            "block_order": 12,
+            "group_id": 12,
+            "block_polygon_points": [
+                [
+                    2330.0,
+                    1409.0
+                ],
+                [
+                    243.0,
+                    1442.0
+                ],
+                [
+                    243.0,
+                    1540.0
+                ],
+                [
+                    2114.0,
+                    1540.0
+                ],
+                [
+                    2330.0,
+                    1524.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[18] Kun Yi et al. Frequency-domain MLPs are more effective learners in time series forecasting. Advances in Neural Information Processing Systems, 36, 2024.",
+            "block_bbox": [
+                242,
+                1529,
+                2338,
+                1657
+            ],
+            "block_id": 13,
+            "block_order": 13,
+            "group_id": 13,
+            "block_polygon_points": [
+                [
+                    242.0,
+                    1548.0
+                ],
+                [
+                    242.0,
+                    1656.0
+                ],
+                [
+                    2337.0,
+                    1638.0
+                ],
+                [
+                    2337.0,
+                    1529.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[19] Taesung Kim et al. Reversible instance normalization for accurate time-series forecasting against distribution shift. 2022.",
+            "block_bbox": [
+                241,
+                1650,
+                2341,
+                1768
+            ],
+            "block_id": 14,
+            "block_order": 14,
+            "group_id": 14,
+            "block_polygon_points": [
+                [
+                    240.19020080566406,
+                    1667.006591796875
+                ],
+                [
+                    2340.0,
+                    1650.0
+                ],
+                [
+                    2340.94677734375,
+                    1766.895263671875
+                ],
+                [
+                    241.136962890625,
+                    1783.90185546875
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[20] Guoqi Yu et al. Revitalizing multivariate time series forecasting. In ICML, 2024.",
+            "block_bbox": [
+                237,
+                1772,
+                1785,
+                1838
+            ],
+            "block_id": 15,
+            "block_order": 15,
+            "group_id": 15,
+            "block_polygon_points": [
+                [
+                    237.0,
+                    1772.0
+                ],
+                [
+                    1785.0,
+                    1772.0
+                ],
+                [
+                    1785.0,
+                    1838.0
+                ],
+                [
+                    237.0,
+                    1838.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[21] Hao Wang et al. Fredf: Learning to forecast in frequency domain. arXiv preprint arXiv:2402.02399, 2024.",
+            "block_bbox": [
+                241,
+                1831,
+                2253,
+                1905
+            ],
+            "block_id": 16,
+            "block_order": 16,
+            "group_id": 16,
+            "block_polygon_points": [
+                [
+                    2252.0,
+                    1831.0
+                ],
+                [
+                    241.0,
+                    1850.0
+                ],
+                [
+                    241.0,
+                    1904.0
+                ],
+                [
+                    1934.0,
+                    1904.0
+                ],
+                [
+                    2252.0,
+                    1886.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[22] Shiyu Wang et al. TimeMixer: Decomposable multiscale mixing for time series forecasting. In ICLR, 2024.",
+            "block_bbox": [
+                238,
+                1899,
+                2278,
+                1972
+            ],
+            "block_id": 17,
+            "block_order": 17,
+            "group_id": 17,
+            "block_polygon_points": [
+                [
+                    2277.0,
+                    1899.0
+                ],
+                [
+                    238.0,
+                    1914.0
+                ],
+                [
+                    238.0,
+                    1971.0
+                ],
+                [
+                    2239.0,
+                    1957.0
+                ],
+                [
+                    2277.0,
+                    1942.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[23] Yunhao Zhang and Junchi Yan. Crossformer: Transformer utilizing cross-dimension dependency for multivariate time series forecasting. In ICLR, 2023.",
+            "block_bbox": [
+                234,
+                1968,
+                2352,
+                2085
+            ],
+            "block_id": 18,
+            "block_order": 18,
+            "group_id": 18,
+            "block_polygon_points": [
+                [
+                    234.0,
+                    1968.0
+                ],
+                [
+                    2352.0,
+                    1968.0
+                ],
+                [
+                    2352.0,
+                    2085.0
+                ],
+                [
+                    234.0,
+                    2085.0
+                ]
+            ]
+        },
+        {
+            "block_label": "reference_content",
+            "block_content": "[24] Ailing Zeng, Muxi Chen, Lei Zhang, and Qiang Xu. Are transformers effective for time series forecasting? In AAAI, 2023.",
+            "block_bbox": [
+                229,
+                2088,
+                2354,
+                2201
+            ],
+            "block_id": 19,
+            "block_order": 19,
+            "group_id": 19,
+            "block_polygon_points": [
+                [
+                    229.0,
+                    2088.0
+                ],
+                [
+                    2354.0,
+                    2088.0
+                ],
+                [
+                    2354.0,
+                    2201.0
+                ],
+                [
+                    229.0,
+                    2201.0
+                ]
+            ]
+        }
+    ],
+    "doc_preprocessor_res": {
+        "input_path": null,
+        "page_index": null,
+        "model_settings": {
+            "use_doc_orientation_classify": true,
+            "use_doc_unwarping": true
+        },
+        "angle": 0
+    },
+    "layout_det_res": {
+        "input_path": null,
+        "page_index": null,
+        "boxes": [
+            {
+                "cls_id": 12,
+                "label": "header",
+                "score": 0.8796988725662231,
+                "coordinate": [
+                    1659,
+                    18,
+                    2358,
+                    80
+                ],
+                "order": null,
+                "polygon_points": [
+                    [
+                        1659.0,
+                        18.0
+                    ],
+                    [
+                        2358.0,
+                        18.0
+                    ],
+                    [
+                        2358.0,
+                        80.0
+                    ],
+                    [
+                        1659.0,
+                        80.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 18,
+                "label": "reference",
+                "score": 0.9657772779464722,
+                "coordinate": [
+                    212,
+                    211,
+                    2353,
+                    2206
+                ],
+                "order": 1,
+                "polygon_points": [
+                    [
+                        212.0,
+                        211.0
+                    ],
+                    [
+                        2353.0,
+                        211.0
+                    ],
+                    [
+                        2353.0,
+                        2206.0
+                    ],
+                    [
+                        212.0,
+                        2206.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9307446479797363,
+                "coordinate": [
+                    207,
+                    224,
+                    2345,
+                    347
+                ],
+                "order": 2,
+                "polygon_points": [
+                    [
+                        207.0,
+                        224.0
+                    ],
+                    [
+                        2345.0,
+                        224.0
+                    ],
+                    [
+                        2345.0,
+                        347.0
+                    ],
+                    [
+                        207.0,
+                        347.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9498339891433716,
+                "coordinate": [
+                    216,
+                    352,
+                    2341,
+                    478
+                ],
+                "order": 3,
+                "polygon_points": [
+                    [
+                        215.22317504882812,
+                        367.0055236816406
+                    ],
+                    [
+                        2340.0,
+                        352.0000305175781
+                    ],
+                    [
+                        2340.77685546875,
+                        461.9945373535156
+                    ],
+                    [
+                        216.0,
+                        477.0000305175781
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9386115670204163,
+                "coordinate": [
+                    227,
+                    481,
+                    2342,
+                    608
+                ],
+                "order": 4,
+                "polygon_points": [
+                    [
+                        226.21266174316406,
+                        496.005615234375
+                    ],
+                    [
+                        2341.000244140625,
+                        481.0
+                    ],
+                    [
+                        2341.787841796875,
+                        591.994384765625
+                    ],
+                    [
+                        227.000244140625,
+                        607.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.940141499042511,
+                "coordinate": [
+                    235,
+                    605,
+                    2331,
+                    743
+                ],
+                "order": 5,
+                "polygon_points": [
+                    [
+                        234.02621459960938,
+                        622.0079956054688
+                    ],
+                    [
+                        2330.00048828125,
+                        605.0000610351562
+                    ],
+                    [
+                        2330.97412109375,
+                        724.9921264648438
+                    ],
+                    [
+                        234.999755859375,
+                        742.0000610351562
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9348011016845703,
+                "coordinate": [
+                    227,
+                    732,
+                    2332,
+                    870
+                ],
+                "order": 6,
+                "polygon_points": [
+                    [
+                        2331.0,
+                        732.0
+                    ],
+                    [
+                        227.0,
+                        763.0
+                    ],
+                    [
+                        227.0,
+                        869.0
+                    ],
+                    [
+                        2331.0,
+                        839.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9320710897445679,
+                "coordinate": [
+                    231,
+                    850,
+                    2330,
+                    991
+                ],
+                "order": 7,
+                "polygon_points": [
+                    [
+                        231.0,
+                        886.0
+                    ],
+                    [
+                        231.0,
+                        990.0
+                    ],
+                    [
+                        2329.0,
+                        955.0
+                    ],
+                    [
+                        2329.0,
+                        850.0
+                    ],
+                    [
+                        1173.0,
+                        850.0
+                    ],
+                    [
+                        1172.0,
+                        868.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9310036301612854,
+                "coordinate": [
+                    241,
+                    973,
+                    2333,
+                    1105
+                ],
+                "order": 8,
+                "polygon_points": [
+                    [
+                        2332.0,
+                        973.0
+                    ],
+                    [
+                        241.0,
+                        1006.0
+                    ],
+                    [
+                        241.0,
+                        1104.0
+                    ],
+                    [
+                        2179.0,
+                        1088.0
+                    ],
+                    [
+                        2332.0,
+                        1071.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9170994758605957,
+                "coordinate": [
+                    242,
+                    1088,
+                    2278,
+                    1176
+                ],
+                "order": 9,
+                "polygon_points": [
+                    [
+                        2277.0,
+                        1088.0
+                    ],
+                    [
+                        242.0,
+                        1124.0
+                    ],
+                    [
+                        242.0,
+                        1175.0
+                    ],
+                    [
+                        2125.0,
+                        1158.0
+                    ],
+                    [
+                        2277.0,
+                        1140.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.91864413022995,
+                "coordinate": [
+                    241,
+                    1164,
+                    1630,
+                    1243
+                ],
+                "order": 10,
+                "polygon_points": [
+                    [
+                        241.0,
+                        1184.0
+                    ],
+                    [
+                        241.0,
+                        1242.0
+                    ],
+                    [
+                        1629.0,
+                        1223.0
+                    ],
+                    [
+                        1629.0,
+                        1164.0
+                    ],
+                    [
+                        649.0,
+                        1164.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9166139364242554,
+                "coordinate": [
+                    242,
+                    1230,
+                    1778,
+                    1311
+                ],
+                "order": 11,
+                "polygon_points": [
+                    [
+                        242.0,
+                        1251.0
+                    ],
+                    [
+                        242.0,
+                        1310.0
+                    ],
+                    [
+                        1777.0,
+                        1290.0
+                    ],
+                    [
+                        1777.0,
+                        1230.0
+                    ],
+                    [
+                        626.0,
+                        1230.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9417895674705505,
+                "coordinate": [
+                    243,
+                    1290,
+                    2333,
+                    1422
+                ],
+                "order": 12,
+                "polygon_points": [
+                    [
+                        2332.0,
+                        1290.0
+                    ],
+                    [
+                        243.0,
+                        1323.0
+                    ],
+                    [
+                        243.0,
+                        1421.0
+                    ],
+                    [
+                        2294.0,
+                        1405.0
+                    ],
+                    [
+                        2332.0,
+                        1388.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9536073207855225,
+                "coordinate": [
+                    243,
+                    1409,
+                    2331,
+                    1541
+                ],
+                "order": 13,
+                "polygon_points": [
+                    [
+                        2330.0,
+                        1409.0
+                    ],
+                    [
+                        243.0,
+                        1442.0
+                    ],
+                    [
+                        243.0,
+                        1540.0
+                    ],
+                    [
+                        2114.0,
+                        1540.0
+                    ],
+                    [
+                        2330.0,
+                        1524.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9411362409591675,
+                "coordinate": [
+                    242,
+                    1529,
+                    2338,
+                    1657
+                ],
+                "order": 14,
+                "polygon_points": [
+                    [
+                        242.0,
+                        1548.0
+                    ],
+                    [
+                        242.0,
+                        1656.0
+                    ],
+                    [
+                        2337.0,
+                        1638.0
+                    ],
+                    [
+                        2337.0,
+                        1529.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.933883011341095,
+                "coordinate": [
+                    241,
+                    1650,
+                    2341,
+                    1768
+                ],
+                "order": 15,
+                "polygon_points": [
+                    [
+                        240.19020080566406,
+                        1667.006591796875
+                    ],
+                    [
+                        2340.0,
+                        1650.0
+                    ],
+                    [
+                        2340.94677734375,
+                        1766.895263671875
+                    ],
+                    [
+                        241.136962890625,
+                        1783.90185546875
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.8836448788642883,
+                "coordinate": [
+                    237,
+                    1772,
+                    1785,
+                    1838
+                ],
+                "order": 16,
+                "polygon_points": [
+                    [
+                        237.0,
+                        1772.0
+                    ],
+                    [
+                        1785.0,
+                        1772.0
+                    ],
+                    [
+                        1785.0,
+                        1838.0
+                    ],
+                    [
+                        237.0,
+                        1838.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.8768872618675232,
+                "coordinate": [
+                    241,
+                    1831,
+                    2253,
+                    1905
+                ],
+                "order": 17,
+                "polygon_points": [
+                    [
+                        2252.0,
+                        1831.0
+                    ],
+                    [
+                        241.0,
+                        1850.0
+                    ],
+                    [
+                        241.0,
+                        1904.0
+                    ],
+                    [
+                        1934.0,
+                        1904.0
+                    ],
+                    [
+                        2252.0,
+                        1886.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.8981252312660217,
+                "coordinate": [
+                    238,
+                    1899,
+                    2278,
+                    1972
+                ],
+                "order": 18,
+                "polygon_points": [
+                    [
+                        2277.0,
+                        1899.0
+                    ],
+                    [
+                        238.0,
+                        1914.0
+                    ],
+                    [
+                        238.0,
+                        1971.0
+                    ],
+                    [
+                        2239.0,
+                        1957.0
+                    ],
+                    [
+                        2277.0,
+                        1942.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.9267841577529907,
+                "coordinate": [
+                    234,
+                    1968,
+                    2352,
+                    2085
+                ],
+                "order": 19,
+                "polygon_points": [
+                    [
+                        234.0,
+                        1968.0
+                    ],
+                    [
+                        2352.0,
+                        1968.0
+                    ],
+                    [
+                        2352.0,
+                        2085.0
+                    ],
+                    [
+                        234.0,
+                        2085.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 19,
+                "label": "reference_content",
+                "score": 0.92360520362854,
+                "coordinate": [
+                    229,
+                    2088,
+                    2354,
+                    2201
+                ],
+                "order": 20,
+                "polygon_points": [
+                    [
+                        229.0,
+                        2088.0
+                    ],
+                    [
+                        2354.0,
+                        2088.0
+                    ],
+                    [
+                        2354.0,
+                        2201.0
+                    ],
+                    [
+                        229.0,
+                        2201.0
+                    ]
+                ]
+            }
+        ]
+    }
+}

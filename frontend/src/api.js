@@ -28,6 +28,7 @@ export async function getHistory() {
     status: item.status || "ready",
     progress: item.progress || "",
     updated_at: item.timestamp || item.updated_at || "-",
+    queued_at: item.queued_at || "",  // ✨ 这里就是映射过来的排队时间
     path: item.result_dir || item.path || ""
   }));
 }
@@ -110,7 +111,6 @@ export async function getFileContent(path) {
 export async function uploadFile(fileList) {
   const formData = new FormData();
   
-  // 遍历收集文件，利用 webkitRelativePath 保持目录层级
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i];
     formData.append("files", file);

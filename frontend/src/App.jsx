@@ -1,8 +1,152 @@
 // RWKV-ECRA/frontend/src/App.jsx
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { Copy, FileText, Play, RefreshCw, Search, SquarePen, StopCircle, Trash2, ChevronDown, ChevronRight, Loader2, FolderOpen, ListPlus, X } from "lucide-react";
 import { getHistory, getReport, startAnalyze, stopTask, deleteTask, getFiles, deleteFile, getFileContent, uploadFile } from "./api.js";
 import { extractMarkdownOutline, renderMarkdown, reportToMarkdown } from "./markdown.js";
+import { Copy, FileText, Play, RefreshCw, Search, SquarePen, StopCircle, Trash2, ChevronDown, ChevronRight, Loader2, FolderOpen, Folder, File, ListPlus, X } from "lucide-react";
+import ArchitectureGraph from "./ArchitectureGraph.jsx";
+
+function formatCurrentTime() {
+  const d = new Date();
+  const Y = d.getFullYear();
+  const M = String(d.getMonth() + 1).padStart(2, '0');
+  const D = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const s = String(d.getSeconds()).padStart(2, '0');
+  return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+}
+
+function parseTaskTime(taskId) {
+  if (!taskId) return null;
+  const match = taskId.match(/TASK_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
+  return null;
+}
+
+function TaskTimingWidget({ task }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!task) return null;
+  const runTime = parseTaskTime(task.id);
+  const isDone = task.status === 'completed' || task.status === 'failed' || task.status === 'ready';
+
+  // 收起状态的简约 UI
+  if (!isOpen) {
+    return (
+      <button className="task-timing-toggle" onClick={() => setIsOpen(true)} title="查看任务时间线">
+        ⏱️ 任务耗时
+      </button>
+    );
+  }
+
+  // 展开状态的完整 UI
+  return (
+    <div className="task-timing-widget">
+      <div className="timing-header" onClick={() => setIsOpen(false)}>
+        <div className="timing-title">⏱️ 任务时间线</div>
+        <button className="ghost-button compact-btn icon-only" title="收起面板">
+          <ChevronDown size={14} />
+        </button>
+      </div>
+      
+      <div className="timing-body">
+        {task.queued_at && (
+          <div className="timing-row">
+            <span className="timing-label">提交排队:</span>
+            <span className="timing-val">{task.queued_at}</span>
+          </div>
+        )}
+        <div className="timing-row">
+          <span className="timing-label">开始运行:</span>
+          <span className="timing-val">{runTime || task.updated_at}</span>
+        </div>
+        <div className="timing-row">
+          <span className="timing-label">报告生成:</span>
+          <span className="timing-val">{isDone ? task.updated_at : "正在执行..."}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildFileTree(paths) {
+  const root = { name: 'root', type: 'folder', children: {}, path: '' };
+  paths.forEach(path => {
+    const parts = path.split(/[/\\]/).filter(Boolean);
+    let current = root;
+    parts.forEach((part, index) => {
+      const isFile = index === parts.length - 1;
+      if (!current.children[part]) {
+        current.children[part] = {
+          name: part,
+          type: isFile ? 'file' : 'folder',
+          path: isFile ? path : parts.slice(0, index + 1).join('/'),
+          children: {}
+        };
+      }
+      current = current.children[part];
+    });
+  });
+  return root;
+}
+
+function getAllFilePaths(node) {
+  let paths = [];
+  if (node.type === 'file') {
+    paths.push(node.path);
+  } else if (node.children) {
+    Object.values(node.children).forEach(child => {
+      paths = paths.concat(getAllFilePaths(child));
+    });
+  }
+  return paths;
+}
+
+function FileTreeNode({ node, level = 0, onView, onDelete }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const basePadding = 8;
+  const currentIndent = basePadding + level * 16;
+  const fileIndent = currentIndent + 22;
+
+  if (node.type === 'file') {
+    return (
+      <div className="vsc-row" style={{ paddingLeft: `${fileIndent}px` }}>
+        <div className="vsc-item" onClick={() => onView(node.path)}>
+          <File size={14} className="vsc-icon file-icon" />
+          <span className="vsc-label" title={node.name}>{node.name}</span>
+        </div>
+        <button className="vsc-action" onClick={(e) => { e.stopPropagation(); onDelete(node); }} title="删除文件">
+          <Trash2 size={13}/>
+        </button>
+      </div>
+    );
+  }
+
+  const childrenNodes = Object.values(node.children).sort((a, b) => {
+    if (a.type === b.type) return a.name.localeCompare(b.name);
+    return a.type === 'folder' ? -1 : 1;
+  });
+
+  return (
+    <>
+      <div className="vsc-row" style={{ paddingLeft: `${currentIndent}px` }} onClick={() => setIsOpen(!isOpen)}>
+        <div className="vsc-item">
+          <span className="vsc-chevron">
+            {isOpen ? <ChevronDown size={14}/> : <ChevronRight size={14}/>}
+          </span>
+          <Folder size={14} className="vsc-icon folder-icon" fill={isOpen ? "#bae6fd" : "none"} />
+          <span className="vsc-label" title={node.name}>{node.name}</span>
+        </div>
+        <button className="vsc-action" onClick={(e) => { e.stopPropagation(); onDelete(node); }} title="删除整个文件夹及其内容">
+          <Trash2 size={13}/>
+        </button>
+      </div>
+      {isOpen && childrenNodes.map(child => (
+        <FileTreeNode key={child.name} node={child} level={level + 1} onView={onView} onDelete={onDelete} />
+      ))}
+    </>
+  );
+}
 
 function StatusPill({ status }) {
   const normalized = String(status || "ready").toLowerCase();
@@ -31,11 +175,11 @@ function Sidebar({ history, activeId, keyword, onKeywordChange, onSelect, onNewR
       <div className="sidebar-section">
         <button className="primary-action mb-2" type="button" onClick={onNewRun}>
           <SquarePen size={16} />
-          新建研究任务
+          新建分析任务
         </button>
         <button className="ghost-button w-full justify-center" type="button" onClick={onOpenFiles}>
           <FolderOpen size={16} />
-          沙盒文件管理
+          本地工作区文件
         </button>
       </div>
 
@@ -110,10 +254,16 @@ function FileManager({ onClose }) {
     }
   }
 
-  async function handleDelete(f) {
-    if (window.confirm(`确认删除沙盒文件或资源 ${f} ?`)) {
+  async function handleDelete(node) {
+    const isFolder = node.type === 'folder';
+    const msg = isFolder 
+      ? `确认删除整个文件夹 "${node.name}" 及其包含的所有文件？` 
+      : `确认彻底删除本地工作区文件 "${node.name}" ?`;
+
+    if (window.confirm(msg)) {
       try {
-        await deleteFile(f);
+        const pathsToDelete = getAllFilePaths(node);
+        await Promise.all(pathsToDelete.map(p => deleteFile(p)));
         load();
       } catch (err) {
         alert("删除失败：" + err.message);
@@ -121,15 +271,18 @@ function FileManager({ onClose }) {
     }
   }
 
+  const fileTree = useMemo(() => buildFileTree(files), [files]);
+  const rootChildren = Object.values(fileTree.children).sort((a, b) => {
+    if (a.type === b.type) return a.name.localeCompare(b.name);
+    return a.type === 'folder' ? -1 : 1;
+  });
+
   return (
     <div className="file-manager">
-      <div className="file-list">
-        {files.length > 0 ? files.map(f => (
-          <div key={f} className="file-item">
-            <span onClick={() => handleView(f)}>{f}</span>
-            <button type="button" onClick={() => handleDelete(f)}><Trash2 size={14}/></button>
-          </div>
-        )) : <div className="history-meta">暂无本地参考文件，请点击下方上传。</div>}
+      <div className="vsc-tree">
+        {rootChildren.length > 0 ? rootChildren.map(child => (
+          <FileTreeNode key={child.name} node={child} level={0} onView={handleView} onDelete={handleDelete} />
+        )) : <div className="history-meta" style={{padding: '12px'}}>暂无本地工作区文件，请点击下方上传。</div>}
       </div>
       
       <div className="file-actions mt-4">
@@ -147,7 +300,9 @@ function FileManager({ onClose }) {
         <div className="modal-overlay nested-overlay" onClick={() => setViewingFile(null)}>
            <div className="modal-content" onClick={e => e.stopPropagation()}>
              <div className="modal-header">
-               <h3>{viewingFile.name}</h3>
+               <h3 title={viewingFile.name} style={{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'80%'}}>
+                 {viewingFile.name}
+               </h3>
                <button className="ghost-button" onClick={() => setViewingFile(null)}>返回</button>
              </div>
              {viewingFile.type === 'image' ? (
@@ -183,7 +338,7 @@ function Composer({ onSubmit, isAnyRunning, isSubmitting }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           rows={1}
-          placeholder="输入研究主题，开启深度探索... (例如：提取沙盒中所有研报的核心逻辑)"
+          placeholder="输入研究主题，开启深度探索... (例如：提取本地工作区中所有研报的核心逻辑)"
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
@@ -289,7 +444,7 @@ function Sources({ sources = [] }) {
               <div className="source-title">
                 {source.url ? <a href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a> : source.title || "内部文档"}
               </div>
-              <div className="source-type">{source.type === "web" ? "🌎 互联网检索" : "📂 沙盒文件"}</div>
+              <div className="source-type">{source.type === "web" ? "🌎 互联网检索" : "📂 本地工作区文件"}</div>
             </div>
           ))
         ) : (
@@ -331,17 +486,17 @@ export function App() {
   const [fileManagerOpen, setFileManagerOpen] = useState(false);
   const [error, setError] = useState("");
   
-  // 核心：前端任务排队状态和提交流程锁
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
   const [taskQueue, setTaskQueue] = useState(() => {
     try {
       const saved = localStorage.getItem("rwkv_task_queue");
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return parsed.map(q => typeof q === "string" ? { query: q, queuedAt: formatCurrentTime() } : q);
     } catch {
       return [];
     }
   });
-  // 👇 新增：控制排队面板的展开与收起
   const [isQueueOpen, setIsQueueOpen] = useState(false);
 
   const prevStatusRef = useRef(null);
@@ -351,10 +506,8 @@ export function App() {
   const runningTask = history.find(t => t.status === "running");
   const activeTaskItem = history.find(t => t.id === activeId);
 
-  // 队列变更持久化存储
   useEffect(() => {
     localStorage.setItem("rwkv_task_queue", JSON.stringify(taskQueue));
-    // 当队列清空时，自动重置收起状态
     if (taskQueue.length === 0) setIsQueueOpen(false);
   }, [taskQueue]);
 
@@ -433,20 +586,19 @@ export function App() {
     }
   }
 
-  // ==== 核心路由：判断是直接执行还是进入排队 ====
   async function handleQuerySubmit(newQuery) {
+    const taskObj = { query: newQuery, queuedAt: formatCurrentTime() };
     if (isAnyRunning || isSubmitting) {
-      setTaskQueue(prev => [...prev, newQuery]);
+      setTaskQueue(prev => [...prev, taskObj]);
     } else {
-      await executeTask(newQuery);
+      await executeTask(taskObj);
     }
   }
 
-  // ==== 核心执行：真正向后台发包执行 ====
-  async function executeTask(queryToRun) {
+  async function executeTask(taskObj) {
     setIsSubmitting(true);
     try {
-      const response = await startAnalyze({ query: queryToRun });
+      const response = await startAnalyze({ query: taskObj.query, queued_at: taskObj.queuedAt });
       await handleNewTaskSubmitted(response.task_id);
     } catch (err) {
       alert(`提交失败：${err.message}`);
@@ -459,12 +611,11 @@ export function App() {
     setTaskQueue(prev => prev.filter((_, i) => i !== index));
   }
 
-  // ==== 自动化监控（Watcher）：自动弹出排队队列执行下一个任务 ====
   useEffect(() => {
     if (!isAnyRunning && taskQueue.length > 0 && !isSubmitting) {
-      const nextQuery = taskQueue[0];
+      const nextTask = taskQueue[0];
       setTaskQueue(prev => prev.slice(1));
-      executeTask(nextQuery);
+      executeTask(nextTask);
     }
   }, [isAnyRunning, taskQueue, isSubmitting]);
 
@@ -478,7 +629,6 @@ export function App() {
     if (activeTaskItem) {
       const prev = prevStatusRef.current;
       const curr = activeTaskItem.status;
-      
       if (prev === "running" && (curr === "completed" || curr === "ready")) {
         selectReport(activeTaskItem.id);
       }
@@ -503,7 +653,6 @@ export function App() {
       />
 
       <main className="workspace">
-        {/* 👇 新增：左侧悬浮的排队面板挂件 (Absolute 定位脱离文档流) */}
         {taskQueue.length > 0 && (
           <div className="queue-widget">
             {!isQueueOpen ? (
@@ -528,7 +677,7 @@ export function App() {
                   {taskQueue.map((q, i) => (
                     <div key={i} className="queue-item">
                       <span className="queue-number">{i + 1}</span>
-                      <span className="queue-text" title={q}>{q}</span>
+                      <span className="queue-text" title={q.query}>{q.query}</span>
                       <button onClick={() => removeQueuedTask(i)} title="移出排队"><X size={14}/></button>
                     </div>
                   ))}
@@ -563,10 +712,15 @@ export function App() {
           {error ? <div className="error-banner">{error}</div> : null}
 
           {!activeId && !isAnyRunning && (
-            <div className="empty-home">
-              <div className="brand-mark large-mark mb-4">R</div>
-              <h1>开启长文本分析</h1>
-              <p>系统将调度最新的RWKV和云端大模型完成任务</p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '20px 0' }}>
+              <div className="empty-home" style={{ height: 'auto', margin: '40px 0 20px' }}>
+                <div className="brand-mark large-mark mb-4" style={{ margin: '0 auto 16px' }}>R</div>
+                <h1>开启长文本分析</h1>
+                <p>系统将调度最新的RWKV和外部云端大模型完成任务</p>
+              </div>
+              
+              {/* 这里插入架构图组件 */}
+              <ArchitectureGraph />
             </div>
           )}
 
@@ -588,20 +742,21 @@ export function App() {
             </div>
           )}
           
-          {/* 👇 恢复原本 140px 的固定底部留白，面板移走后不再挤压高度 */}
           <div style={{ height: "140px" }} />
         </div>
         
         <div className="workspace-bottom-dock">
           <Composer onSubmit={handleQuerySubmit} isAnyRunning={isAnyRunning} isSubmitting={isSubmitting} />
         </div>
+        
+        {activeTaskItem && <TaskTimingWidget task={activeTaskItem} />}
       </main>
 
       {fileManagerOpen && (
         <div className="modal-overlay" onClick={() => setFileManagerOpen(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>📂 参考文件沙盒 (data/input)</h3>
+              <h3>📂 本地工作区 (data/input)</h3>
               <button className="ghost-button" onClick={() => setFileManagerOpen(false)}>关闭</button>
             </div>
             <FileManager onClose={() => setFileManagerOpen(false)} />

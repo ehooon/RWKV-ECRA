@@ -14,7 +14,7 @@ slm_client = SLMClient()
     name="search_local_file",
     phase="DISCOVERY",
     signature="""[Tool] search_local_file
-- 功能: 基于关键词搜索沙盒文件，返回文件路径及虚拟ID。传空字符串为全量查询。
+- 功能: 基于关键词搜索本地工作区文件，返回文件路径及虚拟ID。传空字符串为全量查询。
 - 参数: keyword (搜索关键词)"""
 )
 def search_local_file(keyword: str = "", path_to_id: dict = None, **kwargs) -> str:
@@ -43,7 +43,7 @@ def search_local_file(keyword: str = "", path_to_id: dict = None, **kwargs) -> s
     name="preview_document_content",
     phase="DISCOVERY",
     signature="""[Tool] preview_document_content
-- 功能: [斥候试读] 让小模型读取本地文件片段，判别其主题和文件类型。用于排查沙盒未知文件是否与任务相关。
+- 功能: [斥候试读] 让小模型读取本地文件片段，判别其主题和文件类型。用于排查本地工作区未知文件是否与任务相关，剔除干扰项。
 - 参数: file_ids (待预览的文件ID数组)"""
 )
 def preview_document_content(file_paths: list = None, actual_file_ids: list = None, agent_state=None, tracker=None, working_memory: dict = None, **kwargs) -> str:
@@ -53,13 +53,11 @@ def preview_document_content(file_paths: list = None, actual_file_ids: list = No
     prompts = []
     valid_files = []
     
-    # 1. 头中尾随机抽样用于试读
     for idx, path in enumerate(file_paths):
         try:
             text = read_local_file(path)
             total_len = len(text)
             
-            # 若文件较短，全量提供；若超过1500字符，执行三段式抽样
             if total_len <= 1500:
                 preview_text = text
             else:
@@ -79,18 +77,14 @@ def preview_document_content(file_paths: list = None, actual_file_ids: list = No
         
     print(f"[试读斥候]: 正在委派 SLM 全面抽样试读 {len(prompts)} 个未知文件...")
     
-    # 2. 呼叫 SLM 批量并发试读
     slm_responses = slm_client.batch_generate(prompts, tracker=tracker)
     
-    # 3. 整理结果并挂载到情报大纲
     for i, out in enumerate(slm_responses):
         fid, fname = valid_files[i]
         clean_out = out.split("</think>")[-1].strip() if "</think>" in out else out.strip()
         
-        # 将换行符替换为平铺文本，保持大纲的单行整洁，防止撑乱 LLM 的视觉版面
         catalog_desc = clean_out.replace('\n', ' | ') 
         
-        # 🔴 核心修复：同步将试读结论写入 agent_state.memory_catalog 和 working_memory
         if agent_state:
             agent_state.memory_catalog[f"Preview_{fid}"] = f"试读结论: {catalog_desc}"
         if working_memory is not None:

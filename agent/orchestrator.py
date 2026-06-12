@@ -75,25 +75,31 @@ class AgentState:
         lines.extend(memory_details)
         return "\n".join(lines)
 
-    def _mount_local_sandbox(self) -> str:
+    def _mount_local_workspace(self) -> str:
         pending_items = []
         for fid, path in self.id_to_path.items():
             if fid in self.abandoned_file_ids:
                 continue 
-            if f"Preview_{fid}" in self.memory_catalog or f"Summary_{fid}" in self.memory_catalog:
+            if f"Summary_{fid}" in self.memory_catalog:
                 continue 
-            pending_items.append(f"- {fid}: {os.path.basename(path)} [未读]")
+            
+            if f"Preview_{fid}" in self.memory_catalog:
+                pending_items.append(f"- {fid}: {os.path.basename(path)} [已试读判定为相关，等待进行全文深度提炼]")
+            else:
+                pending_items.append(f"- {fid}: {os.path.basename(path)} [未读，可试读排查或直接提取]")
             
         if not pending_items:
             return ""
             
         lines = [
-            "【挂载模块: 本地文件沙盒】", 
-            f"发现 {len(pending_items)} 个尚未探索的本地文件资源："
+            "【挂载模块: 本地工作区文件 (Local Workspace)】", 
+            "核心防幻觉红线：本地工作区中的文件可能是【完全相互独立、毫无关联】的实体（例如 A项目 与 B项目）。",
+            "你必须客观独立地提取它们的信息。绝不要因为它们同在一个目录下，就在没有原文依据的情况下，强行脑补或捏造它们之间存在合作、使用或因果关系！",
+            f"发现 {len(pending_items)} 个尚未完全消化的本地文件资源："
         ]
         lines.extend(pending_items[:15])
         if len(pending_items) > 15:
-            lines.append("... (隐藏剩余未处理文件，使用 search_local_file 检索)")
+            lines.append("... (隐藏剩余文件，使用 search_local_file 检索)")
             
         return "\n".join(lines)
 
@@ -106,7 +112,7 @@ class AgentState:
         modules = [
             self._mount_global_env(),
             self._mount_memory_catalog(),
-            self._mount_local_sandbox(),
+            self._mount_local_workspace(),
             self._mount_feedback()
         ]
         return "\n\n".join(m for m in modules if m)
@@ -136,14 +142,13 @@ class Orchestrator:
         with open(trace_file, "w", encoding="utf-8") as f:
             f.write(f"# Deep Research 执行追踪日志\n\n**启动时间**: {session_id}\n**用户指令**: {user_query}\n\n---\n\n")
 
-        # UI 中文映射字典
         PHASE_MAP = {
-            "DISCOVERY": "🔍 探测与发现",
-            "EXTRACTION": "📑 深度提取",
-            "SYNTHESIS": "🧠 聚合适成"
+            "DISCOVERY": "探测与发现",
+            "EXTRACTION": "深度提取",
+            "SYNTHESIS": "聚合适成"
         }
         ACTION_MAP = {
-            "search_local_file": "检索沙盒文件",
+            "search_local_file": "检索本地工作区文件",
             "preview_document_content": "试读文档摘要",
             "delegate_to_small_models": "调度小模型提炼全文",
             "query_checkpoint_via_slm": "执行记忆区细节捞针",
@@ -170,10 +175,10 @@ class Orchestrator:
                 self.state.id_to_path[fid] = p
                 self.state.path_to_id[p] = fid
             self.state.last_feedback = f"系统就绪，目录中发现 {len(initial_files)} 份可用文件。"
-            push_progress(f"✅ 环境就绪：感知到 {len(initial_files)} 份文件。\n")
+            push_progress(f"环境就绪：感知到 {len(initial_files)} 份文件。\n")
         except Exception:
             self.state.last_feedback = "目录为空。"
-            push_progress(f"✅ 环境就绪：本地沙盒目录为空。\n")
+            push_progress(f"环境就绪：本地工作区目录为空。\n")
             
         step_count = 0
         MAX_STEPS = 40 
@@ -190,7 +195,7 @@ class Orchestrator:
             context_text = self.state.to_markdown_context()
 
             try:
-                push_progress(f"🤔 [思考步数 {step_count}] 正在分析环境状态与任务缺口...")
+                push_progress(f"[思考步数 {step_count}] 正在分析环境状态与任务缺口...")
 
                 analysis = self.analyzer.analyze_intent_and_phase(user_query, context_text)
                 phase = analysis.get("next_phase", "DISCOVERY")
@@ -262,9 +267,6 @@ class Orchestrator:
                 with open(trace_file, "a", encoding="utf-8") as f:
                     f.write(f"### 3. 工具执行结果\n\n```text\n{result}\n```\n\n---\n\n")
 
-                # ==========================================
-                # 检查结束标识，如果未成功排版则强制兜底生成报告并跳出循环
-                # ==========================================
                 if self.state.is_finished:
                     if "排版研报" not in str(self.state.final_result) and not is_task_stopped(self.state.task_id):
                         print("\n[系统兜底] 检测到任务结束，强制调起聚合引擎...")
@@ -272,11 +274,8 @@ class Orchestrator:
                         from workflows.report_flow import generate_final_aggregate_reports
                         generate_final_aggregate_reports(working_memory=self.state.working_memory, tracker=self.tracker, agent_state=self.state)
                     
-                    break # 任务完成，跳出 while 循环
+                    break
 
-            # ==========================================
-            # 捕获并处理大模型格式幻觉或工具解析错误
-            # ==========================================
             except Exception as e:
                 error_msg = f"❌ 执行步骤 {step_count} 时发生异常: {str(e)}"
                 print(f"\n{error_msg}")
@@ -285,9 +284,6 @@ class Orchestrator:
                 
                 self.state.last_feedback = f"上一步执行出现严重异常: {str(e)}。请反思调用参数是否符合要求，或尝试调用其他工具。"
 
-        # ==========================================
-        # 兜底：如果步数耗尽还未完成任务，则强制聚合退出，防止挂起
-        # ==========================================
         if not self.state.is_finished and not is_task_stopped(self.state.task_id):
             print("\n[系统兜底] 达到最大探索步数，强制调起聚合引擎...")
             push_progress("⚠️ 达到最大思考步数限制，正在强制生成最终聚合研报...")

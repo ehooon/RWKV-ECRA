@@ -633,6 +633,82 @@ button, input, textarea { font: inherit; outline: none; }
 .file-item button { background: none; border: none; color: #94a3b8; cursor: pointer; }
 .file-item button:hover { color: var(--bad); }
 
+/* =======================================
+   VS Code 风格文件树渲染
+   ======================================= */
+.vsc-tree {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 0;
+  max-height: 400px;
+  overflow-y: auto;
+  font-size: 13px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+}
+
+/* 精致细长滚动条 */
+.vsc-tree::-webkit-scrollbar { width: 6px; }
+.vsc-tree::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+.vsc-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 12px;
+  height: 30px;
+  cursor: pointer;
+  color: #334155;
+  transition: background 0.1s;
+}
+
+/* 边缘到边缘的整行悬浮高亮 */
+.vsc-row:hover { background: #f1f5f9; }
+
+.vsc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.vsc-chevron {
+  width: 16px;
+  display: flex;
+  justify-content: center;
+  color: #94a3b8;
+}
+
+.vsc-icon { flex-shrink: 0; }
+.folder-icon { color: #0284c7; }
+.file-icon { color: #64748b; }
+
+.vsc-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+/* 隐藏删除按钮，仅当悬浮在改行时显示 */
+.vsc-action {
+  opacity: 0;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 4px;
+}
+.vsc-row:hover .vsc-action { opacity: 1; }
+.vsc-action:hover { color: #ef4444; background: #fee2e2; }
+
+.file-actions { display: flex; gap: 12px; }
+.upload-btn { cursor: pointer; display: inline-flex; justify-content: center; flex: 1; }
+
 @media (max-width: 1280px) {
   .content-layout { grid-template-columns: minmax(0, 1fr) 280px; }
   .outline-panel { display: none; }
@@ -816,3 +892,96 @@ html { scroll-behavior: smooth; }
 /* 当有任务执行时，底部大框按钮会变成醒目的蓝色「加入排队」模式 */
 .enqueue-btn { background: #0284c7 !important; }
 .enqueue-btn:hover:not(:disabled) { background: #0369a1 !important; }
+
+/* =======================================
+   独立悬浮任务时间线 (Task Timing Widget)
+   ======================================= */
+
+.task-timing-toggle {
+  position: absolute;
+  bottom: 110px;
+  right: 32px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.task-timing-toggle:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+  background: #fff;
+}
+
+/* 展开时的完整面板面板 */
+.task-timing-widget {
+  position: absolute;
+  bottom: 110px; 
+  right: 32px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 13px;
+  box-shadow: var(--shadow-lg);
+  z-index: 40;
+  min-width: 260px;
+  animation: fade-in 0.2s ease-out;
+  overflow: hidden; /* 保证内部圆角不溢出 */
+}
+
+/* 新增：支持点击收起的 Header */
+.timing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--panel-soft);
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.timing-header:hover {
+  background: #e2e8f0;
+}
+
+.timing-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.timing-body {
+  padding: 14px 16px;
+}
+
+.timing-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.timing-row:last-child { margin-bottom: 0; }
+
+.timing-label { color: var(--muted); }
+.timing-val {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .task-timing-toggle, .task-timing-widget { bottom: 90px; right: 16px; }
+  .task-timing-widget { min-width: 220px; }
+}

@@ -1,0 +1,714 @@
+{
+    "input_path": "output_results/2024-10-15-VisualRWKV-HD and UHD Advancing High-Resolution Processing for Visual Language Models/temp_page.jpg",
+    "page_index": null,
+    "page_count": null,
+    "width": 2481,
+    "height": 3508,
+    "model_settings": {
+        "use_doc_preprocessor": true,
+        "use_layout_detection": true,
+        "use_chart_recognition": false,
+        "use_seal_recognition": false,
+        "use_ocr_for_image_block": false,
+        "format_block_content": false,
+        "merge_layout_blocks": true,
+        "markdown_ignore_labels": [
+            "number",
+            "footnote",
+            "header",
+            "header_image",
+            "footer",
+            "footer_image",
+            "aside_text"
+        ],
+        "return_layout_polygon_points": true
+    },
+    "parsing_res_list": [
+        {
+            "block_label": "text",
+            "block_content": "the test-dev split, while TextVQA is evaluated on its validation set. ScienceQA and POPE metrics are from their respective test sets. MMBench metrics are based on the development set, and MME is evaluated on a specific test set.",
+            "block_bbox": [
+                224,
+                188,
+                2285,
+                394
+            ],
+            "block_id": 0,
+            "block_order": 1,
+            "group_id": 0,
+            "block_polygon_points": [
+                [
+                    224.0,
+                    188.0
+                ],
+                [
+                    2285.0,
+                    188.0
+                ],
+                [
+                    2285.0,
+                    394.0
+                ],
+                [
+                    224.0,
+                    394.0
+                ]
+            ]
+        },
+        {
+            "block_label": "paragraph_title",
+            "block_content": "• C. Data Language",
+            "block_bbox": [
+                194,
+                431,
+                659,
+                504
+            ],
+            "block_id": 1,
+            "block_order": 2,
+            "group_id": 1,
+            "block_polygon_points": [
+                [
+                    194.0,
+                    431.0
+                ],
+                [
+                    659.0,
+                    431.0
+                ],
+                [
+                    659.0,
+                    504.0
+                ],
+                [
+                    194.0,
+                    504.0
+                ]
+            ]
+        },
+        {
+            "block_label": "text",
+            "block_content": "Our training data spans multiple datasets, with most Visual Question Answering (VQA) datasets being in English. The ShareGPT data is multilingual, covering multiple user-contributed languages. Among the evaluation benchmarks, MMBench-cn is in Chinese, while the rest are in English.",
+            "block_bbox": [
+                240,
+                525,
+                2284,
+                725
+            ],
+            "block_id": 2,
+            "block_order": 3,
+            "group_id": 2,
+            "block_polygon_points": [
+                [
+                    240.0,
+                    525.0
+                ],
+                [
+                    2284.0,
+                    525.0
+                ],
+                [
+                    2284.0,
+                    725.0
+                ],
+                [
+                    240.0,
+                    725.0
+                ]
+            ]
+        },
+        {
+            "block_label": "paragraph_title",
+            "block_content": "• D. Hyperparameters",
+            "block_bbox": [
+                210,
+                762,
+                719,
+                825
+            ],
+            "block_id": 3,
+            "block_order": 4,
+            "group_id": 3,
+            "block_polygon_points": [
+                [
+                    210.0,
+                    762.0
+                ],
+                [
+                    719.0,
+                    762.0
+                ],
+                [
+                    719.0,
+                    825.0
+                ],
+                [
+                    210.0,
+                    825.0
+                ]
+            ]
+        },
+        {
+            "block_label": "text",
+            "block_content": "The models used 1.6B parameters for experiments. Detailed hyperparameters for both the vision-language alignment pretraining and the visual instruction tuning phases are listed in Table 10. These include settings optimized for diverse tasks across different datasets, ensuring robust model performance.",
+            "block_bbox": [
+                250,
+                843,
+                2280,
+                1101
+            ],
+            "block_id": 4,
+            "block_order": 5,
+            "group_id": 4,
+            "block_polygon_points": [
+                [
+                    247.98944091796875,
+                    860.0169067382812
+                ],
+                [
+                    2279.000244140625,
+                    842.9998168945312
+                ],
+                [
+                    2281.010986328125,
+                    1082.98291015625
+                ],
+                [
+                    250.000244140625,
+                    1100.0
+                ]
+            ]
+        },
+        {
+            "block_label": "table",
+            "block_content": "<table><tr><td>Hyperparameter</td><td>1.6B-Pretrain</td><td>1.6B-Finetune</td></tr><tr><td>batch size</td><td>256</td><td>128</td></tr><tr><td>lr init</td><td>1e-3</td><td>6e-5</td></tr><tr><td>lr end</td><td>1e-5</td><td>1.5e-5</td></tr><tr><td>lr schedule</td><td>cosine decay</td><td>cosine decay</td></tr><tr><td>lr warmup ratio</td><td>0</td><td>0</td></tr><tr><td>weight decay</td><td>0</td><td>0</td></tr><tr><td>epoch</td><td>2</td><td>2</td></tr><tr><td>optimizer</td><td>AdamW</td><td>AdamW</td></tr><tr><td>DeepSpeed stage</td><td>1</td><td>1</td></tr></table>",
+            "block_bbox": [
+                743,
+                1132,
+                1702,
+                1612
+            ],
+            "block_id": 5,
+            "block_order": null,
+            "group_id": 5,
+            "block_polygon_points": [
+                [
+                    743.0,
+                    1132.0
+                ],
+                [
+                    1702.0,
+                    1132.0
+                ],
+                [
+                    1702.0,
+                    1612.0
+                ],
+                [
+                    743.0,
+                    1612.0
+                ]
+            ]
+        },
+        {
+            "block_label": "figure_title",
+            "block_content": "Table 10: Hyperparameters for 1.6B model pretraining and finetuning.",
+            "block_bbox": [
+                570,
+                1649,
+                1871,
+                1716
+            ],
+            "block_id": 6,
+            "block_order": null,
+            "group_id": 6,
+            "block_polygon_points": [
+                [
+                    569.2180786132812,
+                    1651.458984375
+                ],
+                [
+                    1869.8333740234375,
+                    1635.451416015625
+                ],
+                [
+                    1870.615478515625,
+                    1698.99267578125
+                ],
+                [
+                    570.0001220703125,
+                    1715.000244140625
+                ]
+            ]
+        },
+        {
+            "block_label": "paragraph_title",
+            "block_content": "E Limitations and Future Work",
+            "block_bbox": [
+                180,
+                1821,
+                975,
+                1887
+            ],
+            "block_id": 7,
+            "block_order": 6,
+            "group_id": 7,
+            "block_polygon_points": [
+                [
+                    180.0,
+                    1821.0
+                ],
+                [
+                    975.0,
+                    1821.0
+                ],
+                [
+                    975.0,
+                    1887.0
+                ],
+                [
+                    180.0,
+                    1887.0
+                ]
+            ]
+        },
+        {
+            "block_label": "text",
+            "block_content": "Although the UHD strategies significantly improve model performance, especially on ChartQA, challenges remain in document understanding tasks. Future work will explore improved feature extraction methods and further optimize the model for multimodal tasks.",
+            "block_bbox": [
+                175,
+                1910,
+                2289,
+                2099
+            ],
+            "block_id": 8,
+            "block_order": 7,
+            "group_id": 8,
+            "block_polygon_points": [
+                [
+                    173.62454223632812,
+                    1927.0111083984375
+                ],
+                [
+                    2288.000244140625,
+                    1910.0001220703125
+                ],
+                [
+                    2289.3759765625,
+                    2080.9892578125
+                ],
+                [
+                    175.000244140625,
+                    2098.0
+                ]
+            ]
+        },
+        {
+            "block_label": "paragraph_title",
+            "block_content": "F Use of AI Assistants",
+            "block_bbox": [
+                181,
+                2140,
+                751,
+                2200
+            ],
+            "block_id": 9,
+            "block_order": 8,
+            "group_id": 9,
+            "block_polygon_points": [
+                [
+                    181.0,
+                    2140.0
+                ],
+                [
+                    751.0,
+                    2140.0
+                ],
+                [
+                    751.0,
+                    2200.0
+                ],
+                [
+                    181.0,
+                    2200.0
+                ]
+            ]
+        },
+        {
+            "block_label": "text",
+            "block_content": "In this research, an AI writing assistant is solely employed for the purposes of paraphrasing, spell-checking, and enhancing the author's original content, and it does not introduce any novel content.",
+            "block_bbox": [
+                179,
+                2235,
+                2294,
+                2363
+            ],
+            "block_id": 10,
+            "block_order": 9,
+            "group_id": 10,
+            "block_polygon_points": [
+                [
+                    178.999755859375,
+                    2250.999755859375
+                ],
+                [
+                    2292.999755859375,
+                    2234.999755859375
+                ],
+                [
+                    2293.840576171875,
+                    2346.091552734375
+                ],
+                [
+                    179.840576171875,
+                    2362.091552734375
+                ]
+            ]
+        }
+    ],
+    "doc_preprocessor_res": {
+        "input_path": null,
+        "page_index": null,
+        "model_settings": {
+            "use_doc_orientation_classify": true,
+            "use_doc_unwarping": true
+        },
+        "angle": 0
+    },
+    "layout_det_res": {
+        "input_path": null,
+        "page_index": null,
+        "boxes": [
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.9365686178207397,
+                "coordinate": [
+                    224,
+                    188,
+                    2285,
+                    394
+                ],
+                "order": 1,
+                "polygon_points": [
+                    [
+                        224.0,
+                        188.0
+                    ],
+                    [
+                        2285.0,
+                        188.0
+                    ],
+                    [
+                        2285.0,
+                        394.0
+                    ],
+                    [
+                        224.0,
+                        394.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 17,
+                "label": "paragraph_title",
+                "score": 0.8721513152122498,
+                "coordinate": [
+                    194,
+                    431,
+                    659,
+                    504
+                ],
+                "order": 2,
+                "polygon_points": [
+                    [
+                        194.0,
+                        431.0
+                    ],
+                    [
+                        659.0,
+                        431.0
+                    ],
+                    [
+                        659.0,
+                        504.0
+                    ],
+                    [
+                        194.0,
+                        504.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.9364309906959534,
+                "coordinate": [
+                    240,
+                    525,
+                    2284,
+                    725
+                ],
+                "order": 3,
+                "polygon_points": [
+                    [
+                        240.0,
+                        525.0
+                    ],
+                    [
+                        2284.0,
+                        525.0
+                    ],
+                    [
+                        2284.0,
+                        725.0
+                    ],
+                    [
+                        240.0,
+                        725.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 17,
+                "label": "paragraph_title",
+                "score": 0.8528812527656555,
+                "coordinate": [
+                    210,
+                    762,
+                    719,
+                    825
+                ],
+                "order": 4,
+                "polygon_points": [
+                    [
+                        210.0,
+                        762.0
+                    ],
+                    [
+                        719.0,
+                        762.0
+                    ],
+                    [
+                        719.0,
+                        825.0
+                    ],
+                    [
+                        210.0,
+                        825.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.9396840929985046,
+                "coordinate": [
+                    250,
+                    843,
+                    2280,
+                    1101
+                ],
+                "order": 5,
+                "polygon_points": [
+                    [
+                        247.98944091796875,
+                        860.0169067382812
+                    ],
+                    [
+                        2279.000244140625,
+                        842.9998168945312
+                    ],
+                    [
+                        2281.010986328125,
+                        1082.98291015625
+                    ],
+                    [
+                        250.000244140625,
+                        1100.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 21,
+                "label": "table",
+                "score": 0.9583624601364136,
+                "coordinate": [
+                    743,
+                    1132,
+                    1702,
+                    1612
+                ],
+                "order": null,
+                "polygon_points": [
+                    [
+                        743.0,
+                        1132.0
+                    ],
+                    [
+                        1702.0,
+                        1132.0
+                    ],
+                    [
+                        1702.0,
+                        1612.0
+                    ],
+                    [
+                        743.0,
+                        1612.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 7,
+                "label": "figure_title",
+                "score": 0.880277156829834,
+                "coordinate": [
+                    570,
+                    1649,
+                    1871,
+                    1716
+                ],
+                "order": null,
+                "polygon_points": [
+                    [
+                        569.2180786132812,
+                        1651.458984375
+                    ],
+                    [
+                        1869.8333740234375,
+                        1635.451416015625
+                    ],
+                    [
+                        1870.615478515625,
+                        1698.99267578125
+                    ],
+                    [
+                        570.0001220703125,
+                        1715.000244140625
+                    ]
+                ]
+            },
+            {
+                "cls_id": 17,
+                "label": "paragraph_title",
+                "score": 0.8571474552154541,
+                "coordinate": [
+                    180,
+                    1821,
+                    975,
+                    1887
+                ],
+                "order": 6,
+                "polygon_points": [
+                    [
+                        180.0,
+                        1821.0
+                    ],
+                    [
+                        975.0,
+                        1821.0
+                    ],
+                    [
+                        975.0,
+                        1887.0
+                    ],
+                    [
+                        180.0,
+                        1887.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.9395694136619568,
+                "coordinate": [
+                    175,
+                    1910,
+                    2289,
+                    2099
+                ],
+                "order": 7,
+                "polygon_points": [
+                    [
+                        173.62454223632812,
+                        1927.0111083984375
+                    ],
+                    [
+                        2288.000244140625,
+                        1910.0001220703125
+                    ],
+                    [
+                        2289.3759765625,
+                        2080.9892578125
+                    ],
+                    [
+                        175.000244140625,
+                        2098.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 17,
+                "label": "paragraph_title",
+                "score": 0.863407552242279,
+                "coordinate": [
+                    181,
+                    2140,
+                    751,
+                    2200
+                ],
+                "order": 8,
+                "polygon_points": [
+                    [
+                        181.0,
+                        2140.0
+                    ],
+                    [
+                        751.0,
+                        2140.0
+                    ],
+                    [
+                        751.0,
+                        2200.0
+                    ],
+                    [
+                        181.0,
+                        2200.0
+                    ]
+                ]
+            },
+            {
+                "cls_id": 22,
+                "label": "text",
+                "score": 0.9258532524108887,
+                "coordinate": [
+                    179,
+                    2235,
+                    2294,
+                    2363
+                ],
+                "order": 9,
+                "polygon_points": [
+                    [
+                        178.999755859375,
+                        2250.999755859375
+                    ],
+                    [
+                        2292.999755859375,
+                        2234.999755859375
+                    ],
+                    [
+                        2293.840576171875,
+                        2346.091552734375
+                    ],
+                    [
+                        179.840576171875,
+                        2362.091552734375
+                    ]
+                ]
+            }
+        ]
+    }
+}

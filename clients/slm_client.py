@@ -19,11 +19,11 @@ class SLMClient:
     def batch_generate(self, contents: list[str], tracker=None) -> list[str]:
         payload = {
             "contents": contents,
-            "max_tokens": 1500,       
+            "max_tokens": 2400,       
             "temperature": 1.0,       
             "top_k": 20,
             "top_p": 0.95,
-            "alpha_presence": 1.5,    
+            "alpha_presence": 1.0,    
             "alpha_frequency": 0.0,   
             "alpha_decay": 0.99,
             "stream": True,

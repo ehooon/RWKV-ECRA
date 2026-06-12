@@ -3,6 +3,7 @@ import os
 import json
 import re
 import uuid
+import concurrent.futures
 from typing import List, Dict
 from clients.llm_client import LLMClient
 from config import DATA_PIPELINE
@@ -28,8 +29,17 @@ def get_fs_category_tree() -> dict:
             tree[main_cat][sub_cat] = []
             for file_name in os.listdir(sub_path):
                 if file_name.endswith(".md") and not file_name.startswith("【类别聚合专刊】"):
+                    fname_no_ext = os.path.splitext(file_name)[0]
+                    # 静态反解：从文件名剥离出 DOC_X 烙印
+                    if "___" in fname_no_ext:
+                        name_part, fid = fname_no_ext.rsplit("___", 1)
+                    else:
+                        name_part = fname_no_ext
+                        fid = "UNKNOWN"
+                        
                     tree[main_cat][sub_cat].append({
-                        "name": os.path.splitext(file_name)[0],
+                        "name": name_part,
+                        "fid": fid,
                         "path": os.path.join(sub_path, file_name)
                     })
     return tree
@@ -65,6 +75,10 @@ def batch_process_individual_reports(file_paths: List[str] = None, actual_file_i
     for idx, fid in enumerate(actual_file_ids):
         fname = working_memory.get(f"Path_{fid}", f"doc_{fid}.md")
         fname_no_ext = os.path.splitext(fname)[0]
+        # 防止重复累加 ___DOC_1___DOC_1
+        if "___" in fname_no_ext:
+            fname_no_ext = fname_no_ext.split("___")[0]
+            
         summary_key = f"Summary_{fid}"
         summary = working_memory.get(summary_key, "")
 
@@ -94,12 +108,13 @@ def batch_process_individual_reports(file_paths: List[str] = None, actual_file_i
 
         save_dir = os.path.join(output_base, "分类报告体系", main_cat, sub_cat)
         os.makedirs(save_dir, exist_ok=True)
-        save_path = os.path.join(save_dir, f"{fname_no_ext}.md")
+        # 静态烙印：将 fid 烧入文件名
+        save_path = os.path.join(save_dir, f"{fname_no_ext}___{fid}.md")
         with open(save_path, "w", encoding="utf-8") as f: f.write(report_content)
 
         if main_cat not in cat_tree: cat_tree[main_cat] = {}
         if sub_cat not in cat_tree[main_cat]: cat_tree[main_cat][sub_cat] = []
-        cat_tree[main_cat][sub_cat].append({"name": fname_no_ext, "path": save_path})
+        cat_tree[main_cat][sub_cat].append({"name": fname_no_ext, "fid": fid, "path": save_path})
         
         if summary_key in working_memory:
             del working_memory[summary_key]
@@ -108,7 +123,6 @@ def batch_process_individual_reports(file_paths: List[str] = None, actual_file_i
 
     working_memory["__category_tree__"] = cat_tree
     return "\n".join(results)
-
 
 @ToolRegistry.register(
     name="compress_working_memory",
@@ -145,67 +159,60 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
     print("启动汇聚分析流程 (强绑定隔离溯源模式)...")
     
     source_registry = {}
-    global_conclusions = []
+    static_sources = [] 
     
-    # ==========================================
-    # 1. 装载全局素材并分配 UUID 溯源角标
-    # ==========================================
-    
-    # [1.1] 装载本地归档报告的观点
+    # [1.1] 装载本地归档 (直接从文件树读取烙印的 DOC_X)
     if cat_tree:
         for main_cat, subs in cat_tree.items():
             for sub_cat, docs in subs.items():
                 for d in docs:
                     if os.path.exists(d.get("path", "")):
                         with open(d["path"], "r", encoding="utf-8") as f: 
-                            loc_ref_id = f"LOC_REF_{uuid.uuid4().hex[:8]}"
-                            source_registry[loc_ref_id] = {"title": d['name'], "url": None, "type": "local"}
-                            # 强制打上本地专属内联角标
-                            global_conclusions.append(f"【本地文档 ^{{{loc_ref_id}}}^ 】\n{f.read().strip()}")
+                            fid = d.get("fid", "UNKNOWN")
+                            orig_path = agent_state.id_to_path.get(fid, "") if agent_state else ""
+                            source_registry[fid] = {"title": d['name'], "url": orig_path, "type": "local"}
+                            static_sources.append({"ref_ids": [fid], "content": f.read().strip()})
 
     # [1.2] 装载未归类的本地提炼结果
     if working_memory:
         for k, text in working_memory.items():
             if k.startswith("Summary_"):
-                fid = k.split("_")[1]
+                fid = k.split("_", 1)[1]
                 fname = working_memory.get(f"Path_{fid}", f"未知文档_{fid}")
-                fname_no_ext = os.path.splitext(fname)[0]
-                loc_ref_id = f"LOC_REF_{uuid.uuid4().hex[:8]}"
-                source_registry[loc_ref_id] = {"title": fname_no_ext, "url": None, "type": "local"}
-                global_conclusions.append(f"【本地文档 ^{{{loc_ref_id}}}^ 】\n{text.strip()}")
+                orig_path = agent_state.id_to_path.get(fid, "") if agent_state else ""
+                source_registry[fid] = {"title": os.path.splitext(fname)[0], "url": orig_path, "type": "local"}
+                static_sources.append({"ref_ids": [fid], "content": text.strip()})
                 
-        # [1.3] 注册网络事实的元数据 (网络事实已经在 web_search 工具中被打上了 WEB_REF_XXX)
+        # [1.3] 注册网络事实 (原封不动)
         web_structured = working_memory.get("__web_structured_facts__", [])
         for item in web_structured:
             web_ref_id = item.get("ref_id")
             if web_ref_id:
                 source_registry[web_ref_id] = {"title": item["title"], "url": item["url"], "type": "web"}
                 
-        # [1.4] 追加已被 web_search 组装好包含 ^[WEB_REF_XXX]^ 标记的正文段落
         for k, text in working_memory.items():
             if k.startswith("WebFact_"):
-                global_conclusions.append(text.strip())
+                static_sources.append({"ref_ids": [], "content": text.strip(), "is_web_raw": True})
 
-    # [1.5] 提取无关项（不在提供给大模型的上下文内挂载，仅作静态附录拼装）
+    # [1.5] 提取附录无关项
     audit_notes = []
     if agent_state and agent_state.entity_audit:
         for ent, status in agent_state.entity_audit.items():
             if "卸载" in status or "无关" in status or "放弃" in status:
                 audit_notes.append(f"- 实体【{ent}】: 经检索证实属于无关领域，已在分析链路中物理剔除。")
 
-    if not global_conclusions:
+    if not static_sources:
         return "未找到任何本地归档文档、未归类提炼或联网事实，无法生成报告。"
 
-    combined_text = "\n\n".join(global_conclusions)
-    total_tokens = get_token_count(combined_text)
+    # ==========================================
+    # 2. Token 容量溢出应急处理机制 (同源隔离压缩)
+    # ==========================================
+    total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
     token_limit = DATA_PIPELINE.get("llm_safe_window_tokens", 60000)
     
-    # ==========================================
-    # 2. Token 容量溢出应急处理机制
-    # ==========================================
     if total_tokens > token_limit:
         print(f"\n🚨 [容量重载预警] 聚合素材池已达 {total_tokens} Tokens！远超 {token_limit} 限制。")
-        print("🔄 [底座接管] 开始执行无感折叠降维策略...")
+        print("🔄 [底座接管] 开始执行同源隔离折叠降维策略 (防止跨文件强行关联)...")
         
         from clients.slm_client import SLMClient
         from workflows.map_reduce_flow import clean_slm_output
@@ -214,60 +221,120 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         
         slm = SLMClient()
         max_chunk = DATA_PIPELINE.get("max_chunk_tokens", 800)
-        re_chunks = semantic_chunk_text(combined_text, max_tokens=max_chunk, overlap_ratio=0.0)
-        
-        slm_prompts = [build_slm_sequential_summary_prompt(c, i+1, len(re_chunks), "极限提取结论与论据，并必须保留原有角标", "详尽") for i, c in enumerate(re_chunks)]
-        slm_res = []
         concurrency = SLM_CONFIG.get("concurrency", 16)
         
-        for i in range(0, len(slm_prompts), concurrency):
-            batch = slm_prompts[i:i+concurrency]
-            slm_res.extend(slm.batch_generate(batch, tracker=tracker))
+        local_sources = [s for s in static_sources if not s.get("is_web_raw")]
+        web_sources = [s for s in static_sources if s.get("is_web_raw")]
+        
+        current_local = local_sources
+        pass_num = 1
+        
+        while pass_num <= 2 and (sum(get_token_count(s["content"]) for s in current_local) + sum(get_token_count(s["content"]) for s in web_sources) > token_limit):
+            print(f"   -> 启动 SLM 高速同源压缩 (第 {pass_num} 轮)...")
             
-        slm_cleaned = [clean_slm_output(r) for r in slm_res]
-        combined_text = "\n\n".join([f"【提炼区块 {i+1}】\n{r}" for i, r in enumerate(slm_cleaned) if r and "无实质内容" not in r and r not in ["无", "None"]])
-        total_tokens = get_token_count(combined_text)
-        print(f"✅ SLM 二压完毕，体积缩减至: {total_tokens} Tokens。")
-
-        if total_tokens > token_limit:
-            llm_chunks = semantic_chunk_text(combined_text, max_tokens=token_limit // 2, overlap_ratio=0.0)
-            llm_sub_reports = []
-            
-            for sub_idx, sub_text in enumerate(llm_chunks):
-                sub_msg = [
-                    {"role": "system", "content": "提取骨干事实与数据。必须严格保留原文中的 ^{LOC_REF...}^ 和 ^[WEB_REF...]^ 标签。"},
-                    {"role": "user", "content": f"{sub_text}"}
-                ]
-                try:
-                    sub_rep = llm.chat_completion(sub_msg).content
-                except Exception as e:
-                    sub_rep = f"[局部提炼失败]: {e}"
-                llm_sub_reports.append(f"### [高密事实区块 {sub_idx+1}]\n{sub_rep}")
+            # 🟢 核心修改 1：按来源进行严格分组 (GroupBy)，绝不跨来源组装
+            grouped_sources = {}
+            for src in current_local:
+                # 使用 tuple(sorted) 确保 [DOC_1, DOC_2] 和 [DOC_2, DOC_1] 会被分到同一组
+                key = tuple(sorted(src["ref_ids"]))
+                if key not in grouped_sources:
+                    grouped_sources[key] = []
+                grouped_sources[key].append(src["content"])
                 
-            combined_text = "\n\n" + "="*40 + "\n\n".join(llm_sub_reports)
-            total_tokens = get_token_count(combined_text)
-            print(f"✅ LLM 提取完毕，安全存量: {total_tokens} Tokens。")
+            batched_blocks = []
+            for key, contents in grouped_sources.items():
+                combined_text = "\n\n".join(contents)
+                # 切割单个来源的合并长文本，严格保持该碎片只属于这个来源
+                sub_chunks = semantic_chunk_text(combined_text, max_tokens=max_chunk, overlap_ratio=0.0)
+                for sc in sub_chunks:
+                    batched_blocks.append({"ref_ids": list(key), "content": sc})
+                    
+            slm_prompts = [
+                build_slm_sequential_summary_prompt(
+                    b["content"], i+1, len(batched_blocks), "极限提取结论与事实。保持不同概念的独立性，严禁强行关联！绝对不要输出任何角标、序号或引用声明", "详尽"
+                ) for i, b in enumerate(batched_blocks)
+            ]
             
+            slm_res = []
+            for i in range(0, len(slm_prompts), concurrency):
+                batch = slm_prompts[i:i+concurrency]
+                slm_res.extend(slm.batch_generate(batch, tracker=tracker))
+                
+            slm_cleaned = [clean_slm_output(r) for r in slm_res]
+            
+            next_local = []
+            for i, r in enumerate(slm_cleaned):
+                if r and "无实质内容" not in r and r not in ["无", "None", "none"]:
+                    next_local.append({"ref_ids": batched_blocks[i]["ref_ids"], "content": f"【提炼区块】\n{r}"})
+                    
+            current_local = next_local
+            pass_num += 1
+            curr_tokens = sum(get_token_count(s["content"]) for s in current_local)
+            print(f"   ✅ SLM 第 {pass_num-1} 轮压缩完毕，本地存量缩减至: {curr_tokens} Tokens。")
+
+        # 🟢 核心修改 2：LLM 终极暴力兜底也必须执行同源隔离
+        total_tokens = sum(get_token_count(s["content"]) for s in current_local) + sum(get_token_count(s["content"]) for s in web_sources)
+        if total_tokens > token_limit:
+            print(f"   ⚠️ SLM 二压后仍超限 ({total_tokens} Tokens)，启用 LLM 终极同源隔离提取兜底...")
+            
+            # 同样进行严格的来源分组
+            grouped_sources = {}
+            for src in current_local:
+                key = tuple(sorted(src["ref_ids"]))
+                if key not in grouped_sources:
+                    grouped_sources[key] = []
+                grouped_sources[key].append(src["content"])
+                
+            llm_merged = []
+            for key, contents in grouped_sources.items():
+                combined_text = "\n\n".join(contents)
+                # 单来源太长则分块
+                llm_chunks = semantic_chunk_text(combined_text, max_tokens=token_limit // 3, overlap_ratio=0.0)
+                
+                for c in llm_chunks:
+                    sub_msg = [{"role": "system", "content": "极限提炼核心数据。必须保持不同实体的独立性，严禁强行关联！不输出任何角标。"}, {"role": "user", "content": c}]
+                    try: compressed = llm.chat_completion(sub_msg).content
+                    except: compressed = ""
+                    if compressed: llm_merged.append({"ref_ids": list(key), "content": compressed})
+            
+            current_local = llm_merged
+            
+        static_sources = current_local + web_sources
+        total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
+        print(f"✅ 最终容量锁定: {total_tokens} Tokens。")
+
     # ==========================================
-    # 3. 核心节点生成 (AST 大纲 & 分步排版)
+    # 3. 构造传递给大模型的 Context
     # ==========================================
-    print(f"[架构] 开始分步结构化生成最终报告 (脱水目标模式)...")
-    
+    combined_text_parts = []
+    for src in static_sources:
+        if src.get("is_web_raw"):
+            combined_text_parts.append(src["content"])
+        else:
+            tag_str = "".join([f"^{{{fid}}}^" for fid in src["ref_ids"]])
+            combined_text_parts.append(f"【可用事实素材 {tag_str}】\n{src['content']}")
+            
+    combined_text = "\n\n".join(combined_text_parts)
     STATIC_CONTEXT_PREFIX = f"【可用事实素材池】\n{combined_text}\n\n---\n\n"
     active_goal = agent_state.refined_query if (agent_state and hasattr(agent_state, 'refined_query') and agent_state.refined_query) else kwargs.get("original_goal", "未指定目标")
 
+    # ==========================================
+    # 4. AST 骨架生成与并发批处理渲染
+    # ==========================================
     try:
         print(">> 1/3 正在生成报告骨架树(AST)...")
-        
         outline_sys_prompt = """任务：基于输入的目标和素材池，生成报告结构的 JSON AST 骨架。
 
-约束要求：
-1. 采用【总-分-总】结构。
-2. 章节设置必须基于实际素材池中的数据，无数据支撑的维度不设章节。
-3. 输出 JSON 数组格式，包含 node_id 和 title 字段。示例：
+【🚨 极端重要的防幻觉约束】
+1. 实体隔离：素材池中的文件可能相互之间【毫无关联】（例如 Tilelang 只是运算基建，RWKV 是模型，如果原文没写它们结合使用，就绝对不要将它们写在一起）。
+2. 拒绝强行归纳：如果在不同文件中发现了独立的项目，应该在大纲中为它们建立【互相平行的独立章节】，而不是强行合并或编造“协同效应”。
+3. 采用【总-分-总】结构。无确凿原文数据支撑的维度绝对不设章节。
+
+输出 JSON 数组格式，包含 node_id 和 title 字段。示例：
 [
-  {"node_id": "01_intro", "title": "一、 全局执行摘要与核心结论"},
-  {"node_id": "02_detail", "title": "二、 核心趋势分析"}
+  {"node_id": "01_intro", "title": "一、 全局执行摘要"},
+  {"node_id": "02_rwkv_status", "title": "二、 RWKV 模型现状独立分析"},
+  {"node_id": "03_tilelang_status", "title": "三、 Tilelang 框架独立分析"}
 ]"""
         outline_resp = llm.chat_completion([
             {"role": "system", "content": outline_sys_prompt}, 
@@ -282,42 +349,32 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             ast_skeleton_lines.append(f"{i+1}. [节点: {n.get('node_id')}] {n.get('title')}")
         global_ast_skeleton_str = "\n".join(ast_skeleton_lines)
         
-        global_citation_map = {} 
-        global_citation_list = []
-        citation_counter = [1]    
+        print(f">> 2/3 正在并发与分批生成报告正文 (共 {len(nodes)} 个节点) ...")
         
-        final_raw_parts = []
-        final_beautified_parts = []
-        
-        print(f">> 2/3 正在按节点进行生成并强制继承内嵌溯源标记 (共 {len(nodes)} 个节点) ...")
-        
-        # 🔴 强制继承底层角标的核心提示词
-        writer_sys_prompt = """任务：根据全局 AST 骨架，撰写当前被分配的【多个节点】的正文内容。
+        # 🟢 终极防崩溃：采用 XML 标签代替 JSON 数组
+        writer_sys_prompt = """任务：根据全局 AST 骨架，撰写当前被分配的【特定批次节点】的正文内容。
 
 【极为重要的溯源要求】
-你必须在阐述任何事实、数据、结论的句子末尾，严格保留素材池中自带的溯源角标！
-- 如果引用了本地文档中的内容，照抄对应段落的：^{LOC_REF_XXX}^
-- 如果引用了网络搜索的内容，照抄对应段落的：^[WEB_REF_XXX]^
-- 允许多来源融合标注，例如：“营收增长了20% ^{LOC_REF_123}^^[WEB_REF_456]^。”
-- 不要在 JSON 结构里搞 used_sources 数组了！将角标直接写在 content 正文中！
+你必须在阐述任何事实、结论时，严格照抄素材自带的溯源角标！
+- 本地素材头部会带有类似【可用事实素材 ^{DOC_1}^^{DOC_2}^】的标签，你在使用该段信息时句子末尾必须照抄：^{DOC_1}^^{DOC_2}^。
+- 网络素材正文自带类似 ^[WEB_REF_XXX]^ 的标签，直接照抄。
+- 绝对不要虚构角标！
 
-输出严格的 JSON 数组格式，包含每个节点的 node_id。示例：
-[
-  {
-    "node_id": "01_intro",
-    "content": "节点一的分析正文内容...营收增长了20%^{LOC_REF_123}^^[WEB_REF_456]^。"
-  }
-]"""
+【防崩溃格式要求】
+为了防止格式解析崩溃，绝对不要输出 JSON！
+请严格使用 XML 标签 <NODE id="节点ID">包裹</NODE> 来输出每个节点的正文。
+示例：
+<NODE id="01_intro">
+这里是节点正文...由于种种原因^{DOC_1}^^{DOC_2}^^[WEB_REF_456]^。
+</NODE>
+<NODE id="02_detail">
+这里是第二个节点的正文...
+</NODE>"""
 
-        beautify_sys_prompt = """任务：对输入的文本进行 Markdown 格式重构排版（添加粗体、列表、表格）。不可修改原始事实内容。【绝对不可修改或删除】文中的 ^{LOC_REF_...}^ 和 ^[WEB_REF_...]^ 角标！仅输出格式化正文。"""
+        beautify_sys_prompt = """任务：对输入的文本进行 Markdown 格式重构排版。不可修改事实内容。【绝对不可修改或删除】文中的 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标！仅输出格式化正文。"""
 
-        batch_size = 2 
-        
-        for i in range(0, len(nodes), batch_size):
-            batch_nodes = nodes[i:i+batch_size]
+        def generate_node_batch(batch_nodes):
             batch_titles = [f"【{n.get('title')}】 (ID: {n.get('node_id')})" for n in batch_nodes]
-            print(f"   -> 正在批量处理节点: {', '.join([n.get('title') for n in batch_nodes])} ...")
-            
             node_prompt = f"""{STATIC_CONTEXT_PREFIX}
 全局骨架树：
 {global_ast_skeleton_str}
@@ -327,102 +384,127 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 
 任务目标：{active_goal}
 
-请一次性输出包含以上 {len(batch_nodes)} 个节点内容的 JSON 数组："""
+请按 XML 格式输出以上 {len(batch_nodes)} 个节点的正文："""
 
             raw_resp = llm.chat_completion([{"role": "system", "content": writer_sys_prompt}, {"role": "user", "content": node_prompt}]).content.strip()
             
-            batch_parsed_data = []
-            try:
-                json_match = re.search(r'\[.*\]', raw_resp, re.DOTALL)
-                clean_json_str = json_match.group(0) if json_match else raw_resp
-                batch_parsed_data = json.loads(clean_json_str)
-            except Exception:
-                print(f"   [警告] 批次 JSON 解析失败，将使用容错降级处理。")
-                
+            # 🟢 坚如磐石的正则 XML 解析
             data_map = {}
-            if isinstance(batch_parsed_data, list):
-                for item in batch_parsed_data:
-                    if isinstance(item, dict) and "node_id" in item:
-                        data_map[item["node_id"]] = item
-            elif isinstance(batch_parsed_data, dict):
-                 data_map = batch_parsed_data
-
-            # 节点解析与排版
+            for match in re.finditer(r'<NODE id="([^"]+)">\s*(.*?)\s*</NODE>', raw_resp, re.DOTALL):
+                data_map[match.group(1)] = match.group(2).strip()
+                
+            # 兜底：如果模型完全忘记了写 XML 标签，且本批次只有一个节点，直接吞并全文
+            if not data_map and len(batch_nodes) == 1:
+                data_map[batch_nodes[0]["node_id"]] = raw_resp
+                
+            result_map = {}
             for node in batch_nodes:
                 node_id = node.get("node_id", "unknown")
-                node_title = node.get("title", "未命名章节")
+                raw_content = data_map.get(node_id, f"(节点 {node_id} 生成异常或内容丢失)")
                 
-                node_data = data_map.get(node_id, {})
-                raw_content = node_data.get("content", f"(节点内容缺失或生成格式异常)")
-                
-                # 传入 LLM 进行 Markdown 排版美化
-                beautified_content = llm.chat_completion([{"role": "system", "content": beautify_sys_prompt}, {"role": "user", "content": f"{raw_content}"}]).content.strip()
-                
-                # ==========================================
-                # 执行该节点的角标提取与全局重分配映射
-                # ==========================================
-                node_sources = []
-                node_indices = []
-                
-                def map_and_replace_citation(match, is_web):
-                    ref_id = match.group(1)
-                    if ref_id not in source_registry:
-                        return match.group(0) # 未知角标原样返回
-                        
-                    src_meta = source_registry[ref_id]
-                    matched_title = src_meta["title"]
-                    matched_url = src_meta["url"]
-                    source_type = src_meta["type"]
+                try:
+                    beautified = llm.chat_completion([{"role": "system", "content": beautify_sys_prompt}, {"role": "user", "content": raw_content}]).content.strip()
+                except Exception:
+                    beautified = raw_content
                     
-                    if ref_id not in global_citation_map:
-                        idx = citation_counter[0]
-                        global_citation_map[ref_id] = idx
-                        global_citation_list.append({
-                            "index": idx,
-                            "title": matched_title,
-                            "url": matched_url,
-                            "type": source_type
-                        })
-                        citation_counter[0] += 1
-                        
-                    idx = global_citation_map[ref_id]
-                    if idx not in node_indices:
-                        node_indices.append(idx)
-                        node_sources.append({
-                            "index": idx,
-                            "title": matched_title,
-                            "url": matched_url,
-                            "type": source_type
-                        })
-                    
-                    # 按照用户要求，网络角标为 ^[X]^，本地角标为 ^{X}^
-                    return f"^[{idx}]^" if is_web else f"^{{{idx}}}^"
+                result_map[node_id] = {"raw": raw_content, "beautified": beautified}
+            
+            return result_map
 
-                # ==========================================
-                # 🔴 核心修复：宽容匹配大模型可能漏写的符号，但只吞噬并替换残缺的 REF_ID。
-                # 完美保留正文合法的文字与普通中括号 [2]，例如：[2][WEB_REF_XXX]^ -> [2]^[idx]^
-                # ==========================================
-                beautified_mapped = re.sub(
-                    r'\^?\[?(WEB_REF_[\w\-]+)\]?\^?', 
-                    lambda m: map_and_replace_citation(m, True), 
-                    beautified_content
-                )
-                beautified_mapped = re.sub(
-                    r'\^?[\{\[]?(LOC_REF_[\w\-]+)[\}\]]?\^?', 
-                    lambda m: map_and_replace_citation(m, False), 
-                    beautified_mapped
-                )
-                
-                node["raw_content"] = raw_content
-                node["beautified_content"] = beautified_mapped
-                # 记录该节点引用了哪些资料，用于给前端返回 JSONL 溯源结构
-                node["matched_sources"] = sorted(node_sources, key=lambda x: x["index"])
-                
-                final_raw_parts.append(f"## {node_title}\n\n{raw_content}\n")
-                final_beautified_parts.append(f"## {node_title}\n\n{beautified_mapped}\n")
+        batch_size = 2
+        batches = [nodes[i:i + batch_size] for i in range(0, len(nodes), batch_size)]
+        
+        generated_results = {}
+        max_workers = min(len(batches), 6)
+        
+        print(f"   -> 已拆分为 {len(batches)} 个批次，分配至 {max_workers} 个线程进行并发生成...")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_batch = {executor.submit(generate_node_batch, b): b for b in batches}
+            for future in concurrent.futures.as_completed(future_to_batch):
+                batch_ref = future_to_batch[future]
+                try:
+                    res_map = future.result()
+                    generated_results.update(res_map)
+                    print(f"   ✅ 批次完成: {', '.join([n.get('title', '')[:10]+'...' for n in batch_ref])}")
+                except Exception as e:
+                    print(f"   ❌ 批次失败: {e}")
 
         # ==========================================
-        # Step 4: 最终落盘 (生成引用尾页并写文件)
+        # 5. 串行映射角标（保证编号按顺序）
+        # ==========================================
+        global_citation_map = {} 
+        global_citation_list = []
+        citation_counter = [1]    
+        
+        final_raw_parts = []
+        final_beautified_parts = []
+
+        for node in nodes:
+            node_id = node.get("node_id", "unknown")
+            node_title = node.get("title", "未命名章节")
+            
+            node_data = generated_results.get(node_id, {})
+            raw_content = node_data.get("raw", "")
+            beautified_content = node_data.get("beautified", "")
+            
+            node_sources = []
+            node_indices = []
+            
+            def map_and_replace_citation(match, is_web):
+                ref_id = match.group(1)
+                if ref_id not in source_registry:
+                    # 🟢 不再吞噬！如果有幻觉角标，原样保留在文本中，防止误伤正常文本
+                    return match.group(0) 
+                    
+                src_meta = source_registry[ref_id]
+                matched_title = src_meta["title"]
+                matched_url = src_meta["url"]
+                source_type = src_meta["type"]
+                
+                if ref_id not in global_citation_map:
+                    idx = citation_counter[0]
+                    global_citation_map[ref_id] = idx
+                    global_citation_list.append({
+                        "index": idx,
+                        "title": matched_title,
+                        "url": matched_url,
+                        "type": source_type
+                    })
+                    citation_counter[0] += 1
+                    
+                idx = global_citation_map[ref_id]
+                if idx not in node_indices:
+                    node_indices.append(idx)
+                    node_sources.append({
+                        "index": idx,
+                        "title": matched_title,
+                        "url": matched_url,
+                        "type": source_type
+                    })
+                
+                return f"^[{idx}]^" if is_web else f"^{{{idx}}}^"
+
+            beautified_mapped = re.sub(
+                r'\^?\[?(WEB_REF_[\w\-]+)\]?\^?', 
+                lambda m: map_and_replace_citation(m, True), 
+                beautified_content
+            )
+            # 🟢 兼容 DOC_X 和 UNKNOWN_X 两种前缀
+            beautified_mapped = re.sub(
+                r'\^?[\{\[]?((?:DOC|UNKNOWN)_[\w\-]+)[\}\]]?\^?', 
+                lambda m: map_and_replace_citation(m, False), 
+                beautified_mapped
+            )
+            
+            node["raw_content"] = raw_content
+            node["beautified_content"] = beautified_mapped
+            node["matched_sources"] = sorted(node_sources, key=lambda x: x["index"])
+            
+            final_raw_parts.append(f"## {node_title}\n\n{raw_content}\n")
+            final_beautified_parts.append(f"## {node_title}\n\n{beautified_mapped}\n")
+
+        # ==========================================
+        # Step 6: 最终落盘 
         # ==========================================
         print(">> 3/3 正在归档多版本报告及结构化溯源数据...")
         
@@ -430,17 +512,14 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         os.makedirs(output_dir, exist_ok=True)
         task_prefix = agent_state.task_id if agent_state and getattr(agent_state, 'task_id', '') else "最终研报"
         
-        # 组装附录（被阻断和无关的实体说明）
         appendix_str = ""
         if audit_notes:
             appendix_str = "\n\n---\n## 附录：信息排查声明\n\n" + "\n".join(audit_notes) + "\n"
 
-        # 1. 原始版 MD
         raw_report_path = os.path.join(output_dir, f"{task_prefix}_01_原生初稿版.md")
         with open(raw_report_path, "w", encoding="utf-8") as f:
             f.write("# 最终原生分析初稿\n\n" + "\n\n".join(final_raw_parts) + appendix_str)
             
-        # 2. 排版版 MD
         beautified_report_path = os.path.join(output_dir, f"{task_prefix}_02_深度排版溯源版.md")
         full_beautified = "# 最终深度分析研报\n\n" + "\n\n".join(final_beautified_parts)
         
@@ -457,7 +536,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         with open(beautified_report_path, "w", encoding="utf-8") as f:
             f.write(full_beautified + reference_md + appendix_str)
 
-        # 3. JSONL 数据溯源备份 (前端结构化读取展示用)
         jsonl_path = os.path.join(output_dir, f"{task_prefix}_03_结构化溯源数据.jsonl")
         with open(jsonl_path, "w", encoding="utf-8") as f:
             f.write(json.dumps({
@@ -482,7 +560,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         print(f"[归档成功] 高级排版及解耦溯源报告: {beautified_report_path}")
         print(f"[归档成功] JSONL 零幻觉映射结构树: {jsonl_path}")
             
-        # 内存释放与状态完结
         processed_abs_paths = [v for k, v in (working_memory or {}).items() if k.startswith("AbsPath_")]
         if processed_abs_paths: clear_checkpoints_for_files(processed_abs_paths)
         
