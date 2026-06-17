@@ -196,10 +196,15 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 
     # [1.5] 提取附录无关项
     audit_notes = []
+    # 🟢 获取用户最初的原始指令
+    original_query = agent_state.user_query if agent_state and hasattr(agent_state, 'user_query') else kwargs.get("original_goal", "")
+    
     if agent_state and agent_state.entity_audit:
         for ent, status in agent_state.entity_audit.items():
             if "卸载" in status or "无关" in status or "放弃" in status:
-                audit_notes.append(f"- 实体【{ent}】: 经检索证实属于无关领域，已在分析链路中物理剔除。")
+                # 🟢 核心修复：只声明那些用户在 Prompt 中点名问了，但最后证实无关的实体
+                if ent.lower() in original_query.lower() or any(kw in ent for kw in original_query.split()):
+                    audit_notes.append(f"- {ent}: 经检索与查证，确认与当前分析目标无关，已在研报生成链路中剔除。")
 
     if not static_sources:
         return "未找到任何本地归档文档、未归类提炼或联网事实，无法生成报告。"

@@ -35,8 +35,8 @@ def search_local_file(keyword: str = "", path_to_id: dict = None, **kwargs) -> s
     if not path_to_id:
         return json.dumps(raw_paths, ensure_ascii=False)
     if not found_info:
-        return f"未找到包含关键词 '{keyword}' 的文件。请尝试放宽搜索词或全量空词查询。"
-    return f"🔎 检索成功，找到 {len(found_info)} 个匹配文件:\n" + "\n".join(found_info)
+        return f"[系统状态] 未找到包含关键词 '{keyword}' 的文件。请尝试全量空词查询。"
+    return f"[系统状态] 检索完成，找到 {len(found_info)} 个匹配文件:\n" + "\n".join(found_info)
 
 
 @ToolRegistry.register(
@@ -90,6 +90,75 @@ def preview_document_content(file_paths: list = None, actual_file_ids: list = No
         if working_memory is not None:
             working_memory[f"Preview_{fid}"] = catalog_desc
             
-        res.append(f"✅ {fname} 试读完成，情报已登记至目录大纲。")
+        res.append(f"[{fname}] 试读完成，情报已登记。")
         
     return "状态返回: 试读任务结束。请查阅环境上下文中的【运行缓存区】目录大纲，以评估文件关联度。"
+
+@ToolRegistry.register(
+    name="verify_keyword_in_file",
+    phase="ALL",
+    signature="""[Tool] verify_keyword_in_file
+- 功能: [精准验真] 物理级全文检索，验证特定文件中是否真实提及了关键词。用于打破关联幻觉（例如查验A文档是否提到B实体）。
+- 参数: file_ids (目标文件虚拟ID数组), keywords (待验证的关键词字符串数组)"""
+)
+def verify_keyword_in_file(file_ids: list = None, keywords: list = None, agent_state=None, **kwargs) -> str:
+    # 1. 严格参数校验
+    if not file_ids or not isinstance(file_ids, list): 
+        return "[系统状态] 执行失败：未传入有效的目标文件ID数组(file_ids)。"
+    if not keywords or not isinstance(keywords, list): 
+        return "[系统状态] 执行失败：未提供需验证的关键词列表(keywords)。"
+
+    # 2. 内置强制导包，彻底杜绝 NameError 报错
+    import os
+    import re
+    from utils.file_reader import read_local_file
+    
+    results = []
+    global_found_kws = set()
+    
+    # 3. 遍历文件检索
+    for fid in file_ids:
+        # 直接从环境状态中取路径，防止路径映射异常
+        if agent_state and hasattr(agent_state, 'id_to_path') and fid in agent_state.id_to_path:
+            path = agent_state.id_to_path[fid]
+        else:
+            results.append(f"📄 【{fid}】 验证跳过: ID无效或该文件已被物理屏蔽。")
+            continue
+            
+        fname = os.path.basename(path)
+        try:
+            text = read_local_file(path)
+            file_res = [f"📄 【{fname}】 验真结果:"]
+            
+            for kw in keywords:
+                # 转义搜索词中的特殊符号，防止正则崩溃
+                safe_kw = re.escape(str(kw))
+                matches = list(re.finditer(safe_kw, text, re.IGNORECASE))
+                count = len(matches)
+                
+                if count == 0:
+                    file_res.append(f"  - 关键词 '{kw}': 出现 0 次")
+                else:
+                    global_found_kws.add(str(kw))  # 记录该词在全局找到了
+                    first_m = matches[0]
+                    start = max(0, first_m.start() - 30)
+                    end = min(len(text), first_m.end() + 30)
+                    context_snippet = text[start:end].replace('\n', ' ')
+                    file_res.append(f"  - 关键词 '{kw}': 出现 {count} 次。片段: \"...{context_snippet}...\"")
+            
+            results.append("\n".join(file_res))
+            
+        except Exception as e:
+            # 即使单文件读取失败（例如碰到不支持的格式），也能优雅降级而不崩溃
+            results.append(f"📄 【{fname}】 验证读取失败: {str(e)}")
+
+    # 4. 全局状态纠偏：如果指定的关键词在**所有传入查询的文件中**都没有出现，才打上“无关”标签
+    if agent_state and hasattr(agent_state, 'entity_audit') and agent_state.entity_audit:
+        for kw in keywords:
+            if str(kw) not in global_found_kws:
+                # 在状态树中寻找相关的实体
+                for ent in list(agent_state.entity_audit.keys()):
+                    if str(kw).lower() in ent.lower() or ent.lower() in str(kw).lower():
+                        agent_state.entity_audit[ent] = f"确认无关 (在指定的 {len(file_ids)} 个文件中均未检出，已打破强制关联)"
+
+    return "[系统状态] 全文验真执行完毕：\n\n" + "\n\n".join(results)

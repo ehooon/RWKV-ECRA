@@ -24,3 +24,4 @@ frontend/dist/
 debug_slm/
 logs/
 package-lock.json
+!data/output/tasks.jsonl

@@ -1,26 +1,27 @@
 # RWKV-ECRA/prompts/llm_prompts.py
 import json
 
+# RWKV-ECRA/prompts/llm_prompts.py
+
 def build_orchestrator_system_prompt() -> str:
     return """根据用户指令，调用工具完成长文本分析任务。
 你只能通过 `file_ids`（如 ['DOC_1']）对挂载可见的文件进行操作。绝对不可虚构ID或凭空想象文件名！
 
 【可用工具】
 - `search_local_file`: 根据关键词检索文件。
-- `preview_document_content`: 读取文件片段，了解内容概况（用于排查无关文件）。
+- `preview_document_content`: 读取文件片段，了解内容概况。
+- `verify_keyword_in_file`: 物理级全文检索，确认文件中是否真实包含某实体名词（用于验证关联性）。
 - `delegate_to_small_models`: 触发模型对长文本进行全文摘要提炼。
-- `query_checkpoint_via_slm`: 在已提取的摘要缓存中进行特定信息检索。
-- `batch_process_individual_reports`: 基于提炼结果，生成单篇分类报告并释放内存。
+- `query_checkpoint_via_slm`: 在已提取的摘要缓存中进行特定细节捞针。
+- `execute_web_search`: 针对缺乏本地信息支撑的实体执行联网检索。
+- `batch_process_individual_reports`: 归档单篇分类报告并释放内存。
 - `generate_final_aggregate_reports`: 跨域聚合分析，生成全局总述报告。
-- `compress_working_memory`: 当出现 Token 超限警告时，对缓存数据进行文本压缩。
 
 【执行约束红线】：
-1. 基于客观事实输出，禁止编造数据。
-2. 实体隔离原则：本地工作区的文件之间可能毫无关联。如果原文没有明确指出两个实体/技术的关联，严禁强行牵强附会（例如：不要擅自假定 A项目 使用了 B技术）。
-3. 产出管线分流 (正向工作流)：
-   - 针对【本地文件】：提炼完成后，应调用 batch_process_individual_reports 生成单篇研报以释放空间。
-   - 针对【网络事实】：专为全局分析服务，请将其保留在缓存中，最后直接调用 generate_final_aggregate_reports 进行最终汇总。
-4. 若聚合时收到 Token 超限警告，必须调用 compress_working_memory 缩减文本体积后再尝试。"""
+1. 防强行关联幻觉：如果你试图推断 A实体（如某项目）与 B实体（如某技术）有关联，必须先调用 `verify_keyword_in_file` 在A的文件中搜索B的名字！如果返回出现 0 次，必须将该实体标为无关并放弃关联！
+2. 产出管线分流 (正向工作流)：
+   - 针对【本地文件】：提炼完成后，应调用 batch_process_individual_reports 释放空间。
+   - 针对【网络事实】：不可再次调用提炼工具，请将其保留在缓存中直到最终汇总。"""
 
 def build_orchestrator_user_prompt(context_text: str) -> str:
     return f"阅读以下环境状态，根据用户指令进行推演并选择工具。\n\n{context_text}"

@@ -46,6 +46,13 @@ class AgentState:
             f"- 系统时间: {current_time_str}", 
             f"- 当前执行目标: {active_query}"
         ]
+        
+        # 🟢 新增：把当前的实体状态挂载到环境变量中，防止大模型失忆重置
+        if self.entity_audit:
+            env_lines.append("- 🎯 当前实体校验状态 (Entity Audit):")
+            for ent, status in self.entity_audit.items():
+                env_lines.append(f"  * {ent}: {status}")
+                
         return "\n".join(env_lines)
 
     def _mount_memory_catalog(self) -> str:

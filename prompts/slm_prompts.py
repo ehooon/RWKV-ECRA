@@ -59,12 +59,12 @@ def build_slm_query_checkpoint_prompt(chunk_str: str, query: str, is_english: bo
             f"Assistant: <think>\n</think>"
         )
 
-# 找到 build_slm_web_search_compress_prompt 并替换为如下代码
-def build_slm_web_search_compress_prompt(query: str, raw_text: str) -> str:
+
+def build_slm_web_search_compress_prompt(query: str, raw_text: str, goal: str) -> str:
     clean_text = _wash_slm_input(raw_text)
     return (
-        f"User: 请阅读下方的网页搜索结果，提取关于【{query}】的客观事实。\n"
-        f"如果搜索结果表明该实体与当前领域无关，请直接客观陈述其真实身份（例如：说明其为一名演员、虚拟角色、或其他领域的品牌等），无需强行将其与当前业务建立联系。\n"
+        f"User: 我们的调查目标是“{goal}”。请阅读下方的网页内容，提取关于【{query}】的客观事实。\n"
+        f"如果发现这个实体跟我们的调查目标毫无关系，请直接说明它的真实身份（比如它只是个网红、游戏或无关品牌），千万不要强行把它和调查目标扯上关系。\n"
         f"文本：\n{clean_text}\n\n"
         f"Assistant: <think>\n</think>"
     )
