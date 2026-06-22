@@ -71,6 +71,11 @@ export async function startAnalyze(body) {
   });
 }
 
+export async function getRuntimeConfig() {
+  const payload = await apiFetch("/frontend-api/config");
+  return payload.data || {};
+}
+
 export async function stopTask(id) {
   return apiFetch(`/frontend-api/analyze/${encodeURIComponent(id)}/stop`, {
     method: "POST",

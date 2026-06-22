@@ -77,7 +77,12 @@ def preview_document_content(file_paths: list = None, actual_file_ids: list = No
         
     print(f"[试读斥候]: 正在委派 SLM 全面抽样试读 {len(prompts)} 个未知文件...")
     
-    slm_responses = slm_client.batch_generate(prompts, tracker=tracker)
+    task_id = agent_state.task_id if agent_state and getattr(agent_state, "task_id", "") else kwargs.get("task_id")
+    slm_scheduler = kwargs.get("slm_scheduler")
+    if slm_scheduler:
+        slm_responses = slm_scheduler.submit(prompts, tracker=tracker, task_id=task_id)
+    else:
+        slm_responses = slm_client.batch_generate(prompts, tracker=tracker, task_id=task_id)
     
     for i, out in enumerate(slm_responses):
         fid, fname = valid_files[i]

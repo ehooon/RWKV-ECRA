@@ -6,12 +6,13 @@ from clients.slm_client import SLMClient
 from clients.llm_client import LLMClient
 from utils.file_reader import read_local_file
 from utils.chunker import semantic_chunk_text, get_token_count
-from config import DATA_PIPELINE, SLM_CONFIG
+from config import DATA_PIPELINE, SLM_CONFIG, get_llm_concurrency, get_slm_concurrency
 from utils.checkpoint import get_checkpoint, save_checkpoint
 from utils.retry import retry_with_fallback
 from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_reduce_prompt
 from tools.registry import ToolRegistry
 from utils.task_manager import is_task_stopped
+import concurrent.futures
 
 slm_client = SLMClient()
 
@@ -85,7 +86,7 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
     if current_tokens <= max_tokens:
         return text 
         
-    print(f"Token 超阈值 ({current_tokens})，启动 LLM 降维压缩...")
+    print(f"\n🚨 Token 超阈值 ({current_tokens})，启动大模型(LLM)极限降维压缩...")
     llm = LLMClient()
     current_text = text
     iteration = 1
@@ -93,31 +94,60 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
     while get_token_count(current_text) > max_tokens and iteration <= 3:
         current_tokens = get_token_count(current_text)
         ratio_str = f"(留存: {(current_tokens/original_file_tokens)*100:.1f}%)" if original_file_tokens else ""
-        print(f"降维循环 {iteration} 启动 | 压缩前: {current_tokens} Tokens {ratio_str}")
+        print(f"♻️ 降维循环 {iteration} 启动 | 压缩前: {current_tokens} Tokens {ratio_str}")
         
         sample_len = min(len(current_text) // 2, 20000) 
         sample_text = current_text[:sample_len] + "\n...[省略]...\n" + current_text[-sample_len:]
         
+        print("   -> 正在让大模型总览全局，制定极限提炼策略...")
         plan_msg = [
             {"role": "system", "content": "制定极限提炼策略，大幅删减边缘细节并合并同类项。输出3条规则。"}, 
             {"role": "user", "content": f"{sample_text}\n请制定策略："}
         ]
-        strategy = llm.chat_completion(plan_msg).content
+        
+        try:
+            strategy = llm.chat_completion(plan_msg).content
+        except Exception as e:
+            strategy = "1. 删减边缘细节。2. 提取核心数据。3. 合并同类项。"
+            print(f"   ⚠️ 策略生成超时，使用默认兜底策略: {e}")
 
-        chunks = semantic_chunk_text(current_text, max_tokens=20000, overlap_ratio=0.0)
-        compressed_pieces = []
-        for chunk in chunks:
+        # 切割为 15000 Token 一个的区块
+        chunks = semantic_chunk_text(current_text, max_tokens=15000, overlap_ratio=0.0)
+        
+        llm_concurrency = get_llm_concurrency()
+        print(f"   -> 🚀 文本已切割为 {len(chunks)} 个碎片，启动滚动并发提炼 (限制并发: {llm_concurrency})...")
+        
+        compressed_pieces = [None] * len(chunks)
+        
+        def _compress_single_chunk(idx, chunk_data):
             exec_msg = [
-                {"role": "system", "content": f"严格按规则提炼：\n{strategy}\n直接输出正文。"}, 
-                {"role": "user", "content": chunk}
+                {"role": "system", "content": f"严格按规则提炼：\n{strategy}\n必须大幅压减字数，直接输出提炼后的正文。"}, 
+                {"role": "user", "content": chunk_data}
             ]
-            compressed_pieces.append(llm.chat_completion(exec_msg).content)
+            try:
+                res = llm.chat_completion(exec_msg).content
+                return idx, True, res
+            except Exception as e:
+                return idx, False, str(e)
+
+        max_workers = min(len(chunks), llm_concurrency)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_compress_single_chunk, i, c) for i, c in enumerate(chunks)]
             
-        current_text = "\n\n".join(compressed_pieces)
+            for f in concurrent.futures.as_completed(futures):
+                idx, success, res = f.result()
+                if success:
+                    compressed_pieces[idx] = res
+                    print(f"      ✅ 区块 {idx+1}/{len(chunks)} 压缩完成。")
+                else:
+                    compressed_pieces[idx] = ""
+                    print(f"      ❌ 区块 {idx+1}/{len(chunks)} 压缩失败: {res}")
+            
+        current_text = "\n\n".join([p for p in compressed_pieces if p])
         
         new_tokens = get_token_count(current_text)
         new_ratio_str = f"(留存: {(new_tokens/original_file_tokens)*100:.1f}%)" if original_file_tokens else ""
-        print(f"降维循环 {iteration} 完成 | 压缩后: {new_tokens} Tokens {new_ratio_str}")
+        print(f"✅ 降维循环 {iteration} 完成 | 压缩后: {new_tokens} Tokens {new_ratio_str}\n")
         
         iteration += 1
         
@@ -135,7 +165,8 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
     if not file_paths: return "未传入目标文件路径"
     
     cfg = DATA_PIPELINE
-    concurrency_limit = SLM_CONFIG.get("concurrency", 16)
+    concurrency_limit = get_slm_concurrency()
+    slm_scheduler = kwargs.get("slm_scheduler")
     reduce_group_size = cfg.get("reduce_group_size", 4) 
     llm_safe_window = cfg.get("llm_safe_window_tokens", 60000)
     slm_reduce_steps_limit = cfg.get("slm_reduce_steps", 2)
@@ -202,7 +233,10 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
         prompts_to_send = [item[3] for item in batch]
         print(f"[SLM 并发调度] 正在发射 {len(prompts_to_send)} 个切片任务 (全局队列剩余: {len(ready_queue)})")
         
-        results = slm_client.batch_generate(prompts_to_send, tracker=tracker)
+        if slm_scheduler:
+            results = slm_scheduler.submit(prompts_to_send, tracker=tracker, task_id=task_id)
+        else:
+            results = slm_client.batch_generate(prompts_to_send, tracker=tracker, task_id=task_id)
         
         # 将结果分配回对应的文档状态中
         for (doc_idx, stage, seq_idx, _), raw_res in zip(batch, results):

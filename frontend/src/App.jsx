@@ -1,6 +1,6 @@
 // RWKV-ECRA/frontend/src/App.jsx
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { getHistory, getReport, startAnalyze, stopTask, deleteTask, getFiles, deleteFile, getFileContent, uploadFile } from "./api.js";
+import { getHistory, getReport, startAnalyze, stopTask, deleteTask, getFiles, deleteFile, getFileContent, uploadFile, getRuntimeConfig } from "./api.js";
 import { extractMarkdownOutline, renderMarkdown, reportToMarkdown } from "./markdown.js";
 import { Copy, FileText, Play, RefreshCw, Search, SquarePen, StopCircle, Trash2, ChevronDown, ChevronRight, Loader2, FolderOpen, Folder, File, ListPlus, X } from "lucide-react";
 import ArchitectureGraph from "./ArchitectureGraph.jsx";
@@ -153,7 +153,7 @@ function StatusPill({ status }) {
   return <span className={`status-pill ${normalized}`}>{normalized}</span>;
 }
 
-function Sidebar({ history, activeId, keyword, onKeywordChange, onSelect, onNewRun, onStop, onDelete, onOpenFiles }) {
+function Sidebar({ history, activeId, keyword, onKeywordChange, onSelect, onNewRun, onStop, onDelete, onOpenFiles, asyncEnabled, onAsyncEnabledChange }) {
   const filtered = useMemo(() => {
     const needle = keyword.trim().toLowerCase();
     return history.filter((item) => {
@@ -181,6 +181,17 @@ function Sidebar({ history, activeId, keyword, onKeywordChange, onSelect, onNewR
           <FolderOpen size={16} />
           本地工作区文件
         </button>
+        <label className="sidebar-toggle" title="开启后，多个任务可同时运行并共享 SLM 队列">
+          <span>异步并行</span>
+          <input
+            type="checkbox"
+            checked={asyncEnabled}
+            onChange={(event) => onAsyncEnabledChange(event.target.checked)}
+          />
+          <span className="toggle-track" aria-hidden="true">
+            <span className="toggle-thumb" />
+          </span>
+        </label>
       </div>
 
       <div className="sidebar-section">
@@ -319,9 +330,10 @@ function FileManager({ onClose }) {
   );
 }
 
-function Composer({ onSubmit, isAnyRunning, isSubmitting }) {
+function Composer({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled }) {
   const [query, setQuery] = useState("");
   const textareaRef = useRef(null);
+  const shouldEnqueue = !asyncEnabled && isAnyRunning;
 
   function submit() {
     if (!query.trim() || isSubmitting) return;
@@ -351,12 +363,12 @@ function Composer({ onSubmit, isAnyRunning, isSubmitting }) {
           }}
         />
         <button
-          className={`send-btn ${isAnyRunning ? 'enqueue-btn' : ''}`}
+          className={`send-btn ${shouldEnqueue ? 'enqueue-btn' : ''}`}
           onClick={submit}
           disabled={isSubmitting || !query.trim()}
-          title={isAnyRunning ? "当前系统执行中，点击加入排队" : "发送并执行"}
+          title={shouldEnqueue ? "当前系统执行中，点击加入排队" : "发送并执行"}
         >
-          {isSubmitting ? <Loader2 className="spin" size={20} /> : (isAnyRunning ? <ListPlus size={20} /> : <Play size={20} fill="currentColor" />)}
+          {isSubmitting ? <Loader2 className="spin" size={20} /> : (shouldEnqueue ? <ListPlus size={20} /> : <Play size={20} fill="currentColor" />)}
         </button>
       </div>
       <div className="composer-footer">RWKV Agent 将自动拆解任务、检索文件与网络、并生成深度研究报告。</div>
@@ -487,6 +499,19 @@ export function App() {
   const [error, setError] = useState("");
   
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const asyncPreferenceLoadedRef = useRef(false);
+  const [asyncEnabled, setAsyncEnabled] = useState(() => {
+    try {
+      const saved = localStorage.getItem("rwkv_async_parallel_enabled");
+      if (saved !== null) {
+        asyncPreferenceLoadedRef.current = true;
+        return JSON.parse(saved);
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  });
   
   const [taskQueue, setTaskQueue] = useState(() => {
     try {
@@ -510,6 +535,26 @@ export function App() {
     localStorage.setItem("rwkv_task_queue", JSON.stringify(taskQueue));
     if (taskQueue.length === 0) setIsQueueOpen(false);
   }, [taskQueue]);
+
+  useEffect(() => {
+    if (asyncPreferenceLoadedRef.current) {
+      localStorage.setItem("rwkv_async_parallel_enabled", JSON.stringify(asyncEnabled));
+    }
+  }, [asyncEnabled]);
+
+  useEffect(() => {
+    async function loadRuntimeConfig() {
+      try {
+        const cfg = await getRuntimeConfig();
+        const saved = localStorage.getItem("rwkv_async_parallel_enabled");
+        if (saved === null && typeof cfg.slm_async_enabled === "boolean") {
+          setAsyncEnabled(cfg.slm_async_enabled);
+          asyncPreferenceLoadedRef.current = true;
+        }
+      } catch (e) {}
+    }
+    loadRuntimeConfig();
+  }, []);
 
   const pollHistory = useCallback(async () => {
     try {
@@ -588,7 +633,7 @@ export function App() {
 
   async function handleQuerySubmit(newQuery) {
     const taskObj = { query: newQuery, queuedAt: formatCurrentTime() };
-    if (isAnyRunning || isSubmitting) {
+    if (!asyncEnabled && (isAnyRunning || isSubmitting)) {
       setTaskQueue(prev => [...prev, taskObj]);
     } else {
       await executeTask(taskObj);
@@ -598,7 +643,7 @@ export function App() {
   async function executeTask(taskObj) {
     setIsSubmitting(true);
     try {
-      const response = await startAnalyze({ query: taskObj.query, queued_at: taskObj.queuedAt });
+      const response = await startAnalyze({ query: taskObj.query, queued_at: taskObj.queuedAt, slm_async_enabled: asyncEnabled });
       await handleNewTaskSubmitted(response.task_id);
     } catch (err) {
       alert(`提交失败：${err.message}`);
@@ -611,13 +656,18 @@ export function App() {
     setTaskQueue(prev => prev.filter((_, i) => i !== index));
   }
 
+  function handleAsyncEnabledChange(value) {
+    asyncPreferenceLoadedRef.current = true;
+    setAsyncEnabled(value);
+  }
+
   useEffect(() => {
-    if (!isAnyRunning && taskQueue.length > 0 && !isSubmitting) {
+    if (!asyncEnabled && !isAnyRunning && taskQueue.length > 0 && !isSubmitting) {
       const nextTask = taskQueue[0];
       setTaskQueue(prev => prev.slice(1));
       executeTask(nextTask);
     }
-  }, [isAnyRunning, taskQueue, isSubmitting]);
+  }, [asyncEnabled, isAnyRunning, taskQueue, isSubmitting]);
 
   useEffect(() => {
     refreshHistory(true);
@@ -650,6 +700,8 @@ export function App() {
         onStop={handleStopTask}
         onDelete={handleDeleteTask}
         onOpenFiles={() => setFileManagerOpen(true)}
+        asyncEnabled={asyncEnabled}
+        onAsyncEnabledChange={handleAsyncEnabledChange}
       />
 
       <main className="workspace">
@@ -746,7 +798,7 @@ export function App() {
         </div>
         
         <div className="workspace-bottom-dock">
-          <Composer onSubmit={handleQuerySubmit} isAnyRunning={isAnyRunning} isSubmitting={isSubmitting} />
+          <Composer onSubmit={handleQuerySubmit} isAnyRunning={isAnyRunning} isSubmitting={isSubmitting} asyncEnabled={asyncEnabled} />
         </div>
         
         {activeTaskItem && <TaskTimingWidget task={activeTaskItem} />}

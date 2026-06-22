@@ -189,7 +189,7 @@ export default function ArchitectureGraph() {
                   <div className="arch-card-tags"><span className="arch-tag c-teal-tag">压缩提炼</span></div>
                 </div>
                 <div className="arch-card c-teal-card" style={{ flex: 1, padding: '10px' }}>
-                  <div className="arch-card-title">原生/Tavily 检索</div>
+                  <div className="arch-card-title">原生/外置检索</div>
                   <div className="arch-card-tags"><span className="arch-tag c-teal-tag">网络信息获取</span></div>
                 </div>
                 <div className="arch-card c-teal-card" style={{ flex: 1, padding: '10px' }}>
@@ -230,7 +230,7 @@ export default function ArchitectureGraph() {
               <div className="arch-card c-blue-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <div className="arch-card-title">外部大模型 (LLM API)</div>
+                    <div className="arch-card-title">云端大模型 (LLM API)</div>
                     <div className="arch-card-sub" style={{marginTop:'2px'}}>支撑智能体逻辑推理、骨架生成与结构化排版</div>
                   </div>
                   <span className="arch-tag c-blue-tag">规划</span>
@@ -239,7 +239,7 @@ export default function ArchitectureGraph() {
               <div className="arch-card c-blue-card">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div>
-                    <div className="arch-card-title">专用小模型 (RWKV)</div>
+                    <div className="arch-card-title">端侧模型 (RWKV)</div>
                     <div className="arch-card-sub" style={{marginTop:'2px'}}>支撑长文本的并发降维、阅读和智能检索</div>
                   </div>
                   <span className="arch-tag c-blue-tag">高并发执行</span>

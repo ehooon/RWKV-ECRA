@@ -6,7 +6,7 @@ import uuid
 import concurrent.futures
 from typing import List, Dict
 from clients.llm_client import LLMClient
-from config import DATA_PIPELINE
+from config import DATA_PIPELINE, get_llm_concurrency
 from utils.checkpoint import clear_checkpoints_for_files
 from tools.registry import ToolRegistry
 from utils.chunker import get_token_count, semantic_chunk_text
@@ -57,6 +57,72 @@ def parse_md_blocks(md_text: str) -> Dict[str, str]:
             current_content.append(line)
     if current_content: blocks[current_heading] = '\n'.join(current_content).strip()
     return blocks
+
+def _iter_cited_source_blocks(src: dict, max_tokens: int) -> list:
+    content = str(src.get("content", "")).strip()
+    if not content:
+        return []
+
+    if src.get("is_web_raw"):
+        if get_token_count(content) <= max_tokens:
+            return [{"ref_ids": [], "content": content}]
+        return [
+            {"ref_ids": [], "content": chunk}
+            for chunk in semantic_chunk_text(content, max_tokens=max_tokens, overlap_ratio=0.0)
+            if chunk.strip()
+        ]
+
+    ref_ids = list(src.get("ref_ids", []))
+    tag_str = "".join([f"^{{{fid}}}^" for fid in ref_ids])
+    header = f"【可用事实素材 {tag_str}】"
+    full_block = f"{header}\n{content}"
+    if get_token_count(full_block) <= max_tokens:
+        return [{"ref_ids": ref_ids, "content": full_block}]
+
+    body_token_budget = max(1, max_tokens - get_token_count(header) - 8)
+    return [
+        {"ref_ids": ref_ids, "content": f"{header}\n{chunk}"}
+        for chunk in semantic_chunk_text(content, max_tokens=body_token_budget, overlap_ratio=0.0)
+        if chunk.strip()
+    ]
+
+def _build_llm_small_report_chunks(static_sources: list, max_tokens: int) -> list:
+    chunks = []
+    pending_parts = []
+    pending_ref_ids = []
+    pending_tokens = 0
+
+    def flush_pending():
+        nonlocal pending_parts, pending_ref_ids, pending_tokens
+        if pending_parts:
+            chunks.append({
+                "ref_ids": list(dict.fromkeys(pending_ref_ids)),
+                "content": "\n\n".join(pending_parts)
+            })
+        pending_parts = []
+        pending_ref_ids = []
+        pending_tokens = 0
+
+    for src in static_sources:
+        for block in _iter_cited_source_blocks(src, max_tokens):
+            block_text = block["content"]
+            block_tokens = get_token_count(block_text)
+            if pending_parts and pending_tokens + block_tokens > max_tokens:
+                flush_pending()
+
+            if not pending_parts and block_tokens > max_tokens:
+                chunks.append({
+                    "ref_ids": list(dict.fromkeys(block.get("ref_ids", []))),
+                    "content": block_text
+                })
+                continue
+
+            pending_parts.append(block_text)
+            pending_ref_ids.extend(block.get("ref_ids", []))
+            pending_tokens += block_tokens
+
+    flush_pending()
+    return chunks
 
 @ToolRegistry.register(
     name="batch_process_individual_reports",
@@ -198,6 +264,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
     audit_notes = []
     # 🟢 获取用户最初的原始指令
     original_query = agent_state.user_query if agent_state and hasattr(agent_state, 'user_query') else kwargs.get("original_goal", "")
+    active_goal = agent_state.refined_query if (agent_state and hasattr(agent_state, 'refined_query') and agent_state.refined_query) else kwargs.get("original_goal", "未指定目标")
     
     if agent_state and agent_state.entity_audit:
         for ent, status in agent_state.entity_audit.items():
@@ -220,13 +287,16 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         print("🔄 [底座接管] 开始执行同源隔离折叠降维策略 (防止跨文件强行关联)...")
         
         from clients.slm_client import SLMClient
+        from agent.orchestrator import GLOBAL_SLM_INPUT_SCHEDULER
         from workflows.map_reduce_flow import clean_slm_output
         from prompts.slm_prompts import build_slm_sequential_summary_prompt
-        from config import SLM_CONFIG
+        from config import get_slm_concurrency
         
         slm = SLMClient()
+        slm_scheduler = kwargs.get("slm_scheduler") or GLOBAL_SLM_INPUT_SCHEDULER
         max_chunk = DATA_PIPELINE.get("max_chunk_tokens", 800)
-        concurrency = SLM_CONFIG.get("concurrency", 16)
+        concurrency = get_slm_concurrency()
+        task_id = agent_state.task_id if agent_state and getattr(agent_state, "task_id", "") else kwargs.get("task_id")
         
         local_sources = [s for s in static_sources if not s.get("is_web_raw")]
         web_sources = [s for s in static_sources if s.get("is_web_raw")]
@@ -263,7 +333,10 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             slm_res = []
             for i in range(0, len(slm_prompts), concurrency):
                 batch = slm_prompts[i:i+concurrency]
-                slm_res.extend(slm.batch_generate(batch, tracker=tracker))
+                if slm_scheduler:
+                    slm_res.extend(slm_scheduler.submit(batch, tracker=tracker, task_id=task_id))
+                else:
+                    slm_res.extend(slm.batch_generate(batch, tracker=tracker, task_id=task_id))
                 
             slm_cleaned = [clean_slm_output(r) for r in slm_res]
             
@@ -277,34 +350,66 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             curr_tokens = sum(get_token_count(s["content"]) for s in current_local)
             print(f"   ✅ SLM 第 {pass_num-1} 轮压缩完毕，本地存量缩减至: {curr_tokens} Tokens。")
 
-        # 🟢 核心修改 2：LLM 终极暴力兜底也必须执行同源隔离
+        # LLM 终极兜底：分块写小报告，再把小报告交给后续大报告流程。
         total_tokens = sum(get_token_count(s["content"]) for s in current_local) + sum(get_token_count(s["content"]) for s in web_sources)
         if total_tokens > token_limit:
-            print(f"   ⚠️ SLM 二压后仍超限 ({total_tokens} Tokens)，启用 LLM 终极同源隔离提取兜底...")
+            print(f"   ⚠️ SLM 二压后仍超限 ({total_tokens} Tokens)，启用 LLM 分块小报告兜底...")
+
+            llm_chunk_limit = max(1, token_limit // 3)
+            report_jobs = _build_llm_small_report_chunks(current_local + web_sources, llm_chunk_limit)
+            small_reports = [None] * len(report_jobs)
+
+            def generate_small_report(job_index, chunk):
+                sub_msg = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "你正在为最终大报告撰写一个分块小报告。"
+                            "只基于输入素材写结构化 Markdown 小报告，不要再按单个文件压缩。"
+                            "必须保留并照抄素材中的 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标；"
+                            "没有原文支撑的关联不要写。"
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"任务目标：{active_goal}\n\n"
+                            f"素材分块 {job_index + 1}/{len(report_jobs)}：\n"
+                            f"{chunk['content']}\n\n"
+                            "请输出这个分块的小报告："
+                        )
+                    }
+                ]
+                try:
+                    report = llm.chat_completion(sub_msg).content.strip()
+                    if not report:
+                        return None
+                    return {
+                        "ref_ids": list(dict.fromkeys(chunk.get("ref_ids", []))),
+                        "content": f"【分块小报告 {job_index + 1}】\n{report}"
+                    }
+                except Exception as e:
+                    print(f"   ❌ LLM 小报告分块 {job_index + 1} 生成失败: {e}")
+                    return None
+
+            if report_jobs:
+                max_workers = min(len(report_jobs), get_llm_concurrency())
+                print(f"   -> LLM 终极兜底已拆分为 {len(report_jobs)} 个素材分块，启用 {max_workers} 路并发写小报告...")
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(generate_small_report, idx, chunk): idx
+                        for idx, chunk in enumerate(report_jobs)
+                    }
+                    for future in concurrent.futures.as_completed(futures):
+                        idx = futures[future]
+                        result = future.result()
+                        if result:
+                            small_reports[idx] = result
+
+            static_sources = [report for report in small_reports if report]
+        else:
+            static_sources = current_local + web_sources
             
-            # 同样进行严格的来源分组
-            grouped_sources = {}
-            for src in current_local:
-                key = tuple(sorted(src["ref_ids"]))
-                if key not in grouped_sources:
-                    grouped_sources[key] = []
-                grouped_sources[key].append(src["content"])
-                
-            llm_merged = []
-            for key, contents in grouped_sources.items():
-                combined_text = "\n\n".join(contents)
-                # 单来源太长则分块
-                llm_chunks = semantic_chunk_text(combined_text, max_tokens=token_limit // 3, overlap_ratio=0.0)
-                
-                for c in llm_chunks:
-                    sub_msg = [{"role": "system", "content": "极限提炼核心数据。必须保持不同实体的独立性，严禁强行关联！不输出任何角标。"}, {"role": "user", "content": c}]
-                    try: compressed = llm.chat_completion(sub_msg).content
-                    except: compressed = ""
-                    if compressed: llm_merged.append({"ref_ids": list(key), "content": compressed})
-            
-            current_local = llm_merged
-            
-        static_sources = current_local + web_sources
         total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
         print(f"✅ 最终容量锁定: {total_tokens} Tokens。")
 
@@ -321,7 +426,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             
     combined_text = "\n\n".join(combined_text_parts)
     STATIC_CONTEXT_PREFIX = f"【可用事实素材池】\n{combined_text}\n\n---\n\n"
-    active_goal = agent_state.refined_query if (agent_state and hasattr(agent_state, 'refined_query') and agent_state.refined_query) else kwargs.get("original_goal", "未指定目标")
 
     # ==========================================
     # 4. AST 骨架生成与并发批处理渲染
@@ -420,7 +524,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         batches = [nodes[i:i + batch_size] for i in range(0, len(nodes), batch_size)]
         
         generated_results = {}
-        max_workers = min(len(batches), 6)
+        max_workers = min(len(batches), get_llm_concurrency())
         
         print(f"   -> 已拆分为 {len(batches)} 个批次，分配至 {max_workers} 个线程进行并发生成...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:

@@ -3,6 +3,7 @@ import os
 import shutil
 import json
 import uvicorn
+import uuid
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, Form
 from fastapi.responses import PlainTextResponse, FileResponse
@@ -28,6 +29,7 @@ class AnalyzeRequest(BaseModel):
     slm_endpoint: Optional[str] = None
     slm_password: Optional[str] = None
     queued_at: Optional[str] = None  # ✨ 新增：接收前端点击发送时的排队时间
+    slm_async_enabled: Optional[bool] = None
 
 # =====================================
 # 2. 基础系统接口 (上传与清理)
@@ -132,6 +134,7 @@ def background_analyze(task_id: str, req: AnalyzeRequest, task_output_dir: str):
     if req.llm_provider: config.override_llm_provider.set(req.llm_provider)
     if req.slm_endpoint: config.override_slm_endpoint.set(req.slm_endpoint)
     if req.slm_password is not None: config.override_slm_password.set(req.slm_password)
+    if req.slm_async_enabled is not None: config.override_slm_async_enabled.set(req.slm_async_enabled)
 
     try:
         agent = Orchestrator()
@@ -147,11 +150,24 @@ def background_analyze(task_id: str, req: AnalyzeRequest, task_output_dir: str):
         config.override_llm_provider.set(None)
         config.override_slm_endpoint.set(None)
         config.override_slm_password.set(None)
+        config.override_slm_async_enabled.set(None)
+
+@app.get("/frontend-api/config")
+def get_frontend_config():
+    return {
+        "code": 200,
+        "data": {
+            "slm_async_enabled": config.get_slm_async_enabled(),
+            "slm_concurrency": config.get_slm_concurrency(),
+            "slm_async_parallelism": config.get_slm_async_parallelism(),
+            "llm_concurrency": config.get_llm_concurrency()
+        }
+    }
 
 @app.post("/api/v1/analyze")
 @app.post("/frontend-api/analyze")
 def analyze_endpoint(req: AnalyzeRequest, bg_tasks: BackgroundTasks):
-    task_id = f"TASK_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    task_id = f"TASK_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     task_output_dir = os.path.join(config.DATA_PIPELINE["output_directory"], task_id)
     
     # ✨ 这里透传 queued_at

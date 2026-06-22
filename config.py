@@ -24,6 +24,7 @@ for key in ["input_directory", "output_directory", "checkpoint_directory", "debu
         DATA_PIPELINE[key] = os.path.join(BASE_DIR, DATA_PIPELINE[key][2:])
 
 AGENT_CONFIG = _cfg.get("AGENT_CONFIG", {})
+LLM_CONFIG = _cfg.get("LLM_CONFIG", {})
 SLM_CONFIG = _cfg.get("SLM_CONFIG", {})
 
 TRACKING = _cfg.get("TRACKING", {})
@@ -39,6 +40,7 @@ override_llm_url: ContextVar[str] = ContextVar("override_llm_url", default=None)
 override_llm_provider: ContextVar[str] = ContextVar("override_llm_provider", default=None)
 override_slm_endpoint: ContextVar[str] = ContextVar("override_slm_endpoint", default=None)
 override_slm_password: ContextVar[str] = ContextVar("override_slm_password", default=None)
+override_slm_async_enabled: ContextVar[bool] = ContextVar("override_slm_async_enabled", default=None)
 
 def get_llm_provider() -> str:
     return override_llm_provider.get() or DEFAULT_LLM_PROVIDER
@@ -60,3 +62,21 @@ def get_slm_endpoint() -> str:
 
 def get_slm_password() -> str:
     return override_slm_password.get() or SLM_CONFIG.get("password", "")
+
+def get_slm_concurrency() -> int:
+    return max(1, int(SLM_CONFIG.get("concurrency", 16)))
+
+def get_slm_async_parallelism() -> int:
+    return max(1, int(SLM_CONFIG.get("async_parallelism", 1)))
+
+def get_slm_async_batch_wait_ms() -> int:
+    return max(0, int(SLM_CONFIG.get("async_batch_wait_ms", 20)))
+
+def get_slm_async_enabled() -> bool:
+    override_value = override_slm_async_enabled.get()
+    if override_value is not None:
+        return bool(override_value)
+    return bool(SLM_CONFIG.get("enable_async_parallel", False))
+
+def get_llm_concurrency() -> int:
+    return max(1, int(LLM_CONFIG.get("concurrency", 6)))

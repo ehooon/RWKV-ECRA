@@ -3,7 +3,7 @@ import os
 from typing import List
 from clients.slm_client import SLMClient
 from utils.chunker import semantic_chunk_text
-from config import DATA_PIPELINE, SLM_CONFIG
+from config import DATA_PIPELINE, get_slm_concurrency
 from utils.checkpoint import get_checkpoint
 from prompts.slm_prompts import build_slm_query_checkpoint_prompt
 from workflows.map_reduce_flow import clean_slm_output
@@ -22,7 +22,9 @@ slm_client = SLMClient()
 def query_checkpoint_via_slm(file_paths: List[str] = None, query_instruction: str = "捞针", tracker=None, **kwargs) -> str:
     if not file_paths: return "未提供目标路径。"
     final_feedback = []
-    concurrency_limit = SLM_CONFIG.get("concurrency", 16)
+    concurrency_limit = get_slm_concurrency()
+    task_id = kwargs.get("task_id")
+    slm_scheduler = kwargs.get("slm_scheduler")
     cat_tree = get_fs_category_tree()
     
     # 🌟 1. 铺平所有文件的并发任务队列
@@ -72,7 +74,10 @@ def query_checkpoint_via_slm(file_paths: List[str] = None, query_instruction: st
         batch = ready_queue[i : i + concurrency_limit]
         prompts_to_send = [item[2] for item in batch]
         
-        results = slm_client.batch_generate(prompts_to_send, tracker=tracker)
+        if slm_scheduler:
+            results = slm_scheduler.submit(prompts_to_send, tracker=tracker, task_id=task_id)
+        else:
+            results = slm_client.batch_generate(prompts_to_send, tracker=tracker, task_id=task_id)
         
         for (doc_idx, seq_idx, _), raw_res in zip(batch, results):
             doc_states[doc_idx]["results"][seq_idx] = clean_slm_output(raw_res)

@@ -4,7 +4,7 @@ import re
 import uuid
 import json
 import concurrent.futures
-from config import API_KEYS, SEARCH_CONFIG, DATA_PIPELINE, SLM_CONFIG, get_llm_provider
+from config import API_KEYS, SEARCH_CONFIG, DATA_PIPELINE, get_llm_provider, get_slm_concurrency
 from tools.registry import ToolRegistry
 from clients.slm_client import SLMClient
 from clients.llm_client import LLMClient
@@ -12,6 +12,94 @@ from prompts.slm_prompts import build_slm_web_search_compress_prompt
 from utils.chunker import get_token_count, semantic_chunk_text
 
 slm_client = SLMClient()
+
+EMPTY_WEB_FACT_MARKERS = ("未找到", "无实质内容", "None")
+
+def _clean_slm_web_output(output: str) -> str:
+    if not output:
+        return ""
+    return output.split("</think>")[-1].strip() if "</think>" in output else output.strip()
+
+def _is_empty_web_fact(text: str) -> bool:
+    return not text or any(marker in text for marker in EMPTY_WEB_FACT_MARKERS)
+
+def _normalize_keyword_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "")).lower()
+
+def _extract_query_keywords(query: str) -> list:
+    normalized_query = _normalize_keyword_text(query)
+    keywords = []
+    if normalized_query:
+        keywords.append(normalized_query)
+
+    for token in re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", str(query or "").lower()):
+        if len(token) >= 2 and token not in keywords:
+            keywords.append(token)
+
+    return keywords
+
+def _raw_web_result_matches_query(result: dict, query: str) -> bool:
+    keywords = _extract_query_keywords(query)
+    if not keywords:
+        return True
+
+    raw_text = " ".join(str(result.get(key, "")) for key in ("title", "content", "url"))
+    normalized_raw_text = _normalize_keyword_text(raw_text)
+    return any(keyword in normalized_raw_text for keyword in keywords)
+
+def _filter_raw_web_results_by_query(results: list, query: str) -> tuple:
+    kept_results = []
+    dropped_results = []
+
+    for result in results:
+        if _raw_web_result_matches_query(result, query):
+            kept_results.append(result)
+        else:
+            dropped_results.append(result)
+
+    return kept_results, dropped_results
+
+def _assemble_web_search_facts(all_responses: list, prompt_metadata: list) -> tuple:
+    """组装 SLM 提炼结果；这里只过滤空输出，不做相关性审查。"""
+    sources = {}
+
+    for idx, out in enumerate(all_responses):
+        if idx >= len(prompt_metadata):
+            break
+
+        clean_out = _clean_slm_web_output(out)
+        if _is_empty_web_fact(clean_out):
+            continue
+
+        meta = prompt_metadata[idx]
+        ref_id = meta["ref_id"]
+        source = sources.setdefault(ref_id, {
+            "title": meta["title"],
+            "url": meta["url"],
+            "facts": []
+        })
+
+        source["facts"].append(clean_out)
+
+    clean_parts = []
+    structured_web_facts = []
+    processed_refs = set()
+
+    for ref_id, source in sources.items():
+        if not source["facts"]:
+            continue
+
+        processed_refs.add(ref_id)
+        structured_web_facts.append({
+            "ref_id": ref_id,
+            "title": source["title"],
+            "url": source["url"],
+            "content": "Tavily智能多源融合事实"
+        })
+        for fact in source["facts"]:
+            clean_parts.append(f"【网络情报 ^[{ref_id}]^ 】 {source['title']}：{fact}")
+
+    return clean_parts, structured_web_facts, processed_refs
 
 def _generate_search_queries(query: str, active_goal: str) -> list:
     """让 AI 动态生成多维度搜索提示词"""
@@ -57,8 +145,8 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
         print(f"[Web Search]: 🚀 启动文心原生关联检索 -> 实体: '{query}' ...")
         llm = LLMClient()
         prompt_msg = [
-            {"role": "system", "content": "执行深度联网检索。你必须自主判断该实体与用户目标的关联性。如果它与当前业务领域毫无关系（例如是毫不相干的网红/娱乐/游戏等跨界实体），请直接指出其真实身份并明确声明“与调查目标无关”。"},
-            {"role": "user", "content": f"全局调查目标: {active_goal}\n请全面调查: {query} 是什么？它最近有什么动态？它与我们的调查目标是否有实质性影响或关联？"}
+            {"role": "system", "content": "执行深度联网检索。基于原生搜索结果提取与用户目标相关的客观事实，保留可溯源信息。"},
+            {"role": "user", "content": f"全局调查目标: {active_goal}\n请全面调查: {query} 是什么？它最近有什么动态？它与我们的调查目标有哪些事实性信息可以参考？"}
         ]
         
         try:
@@ -84,8 +172,7 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
                 working_memory["__web_structured_facts__"].extend(structured_facts)
                 if agent_state:
                     agent_state.memory_catalog[f"WebFact_{safe_query}"] = "状态: 已提炼完成，直接可用，切勿再次提取"
-                    # 若文心判定为无关，直接将状态置为无关
-                    status_str = "确认无关 (跨界干扰项)" if "无关" in response_text and query in response_text else "确认相关 (已完成提炼)"
+                    status_str = "确认相关 (已完成提炼)"
                     for ent in list(agent_state.entity_audit.keys()):
                         if ent.lower() in query.lower() or query.lower() in ent.lower():
                             agent_state.entity_audit[ent] = status_str
@@ -130,6 +217,12 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
                 unique_results.append(r)
         
         if not unique_results: return f"[系统状态] 搜索实体 '{query}' 无有效结果返回。"
+
+        unique_results, dropped_raw_results = _filter_raw_web_results_by_query(unique_results, query)
+        if dropped_raw_results:
+            print(f"[Web Search]: 静态关键词检查已丢弃 {len(dropped_raw_results)} 个未命中 '{query}' 的原始网页结果。")
+        if not unique_results:
+            return f"[系统状态] 搜索实体 '{query}' 的结果均未通过原始网页关键词检查。"
         
         # 3. 构建 SLM 校验队列
         prompts = []
@@ -147,45 +240,20 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
             
         print(f"[Web Search]: 🛡️ 启动 SLM 全文隔离与目标去噪 (共 {len(prompts)} 个分块)...")
         all_responses = []
-        for i in range(0, len(prompts), SLM_CONFIG.get("concurrency", 16)):
-            all_responses.extend(slm_client.batch_generate(prompts[i:i+SLM_CONFIG.get("concurrency", 16)], tracker=tracker))
+        task_id = agent_state.task_id if agent_state and getattr(agent_state, "task_id", "") else kwargs.get("task_id")
+        slm_scheduler = kwargs.get("slm_scheduler")
+        concurrency_limit = get_slm_concurrency()
+        for i in range(0, len(prompts), concurrency_limit):
+            prompt_batch = prompts[i:i+concurrency_limit]
+            if slm_scheduler:
+                all_responses.extend(slm_scheduler.submit(prompt_batch, tracker=tracker, task_id=task_id))
+            else:
+                all_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
             
-        structured_web_facts = []
-        clean_parts = []
-        processed_refs = set()
-        
-        irrelevant_votes = 0  
-        valid_chunk_count = 0
-        
-        # 4. 组装与跨界投票裁决 (兼容小模型的自然语言输出)
-        for idx, out in enumerate(all_responses):
-            clean_out = out.split("</think>")[-1].strip() if "</think>" in out else out.strip()
-            if not clean_out or any(m in clean_out for m in ["未找到", "无实质内容", "None"]):
-                continue
-                
-            valid_chunk_count += 1
-            
-            # 🟢 兼容自然语言判定：捕捉小模型话语中暗示“不沾边”的口语化特征词
-            if any(kw in clean_out for kw in ["无关", "毫无关系", "不相干", "没有关系", "真实身份"]):
-                irrelevant_votes += 1
-                
-            meta = prompt_metadata[idx]
-            ref_id = meta["ref_id"]
-            
-            clean_parts.append(f"【网络情报 ^[{ref_id}]^ 】 {meta['title']}：{clean_out}")
-            if ref_id not in processed_refs:
-                structured_web_facts.append({"ref_id": ref_id, "title": meta["title"], "url": meta["url"], "content": "Tavily智能多源融合事实"})
-                processed_refs.add(ref_id)
-                
-        # 👑 核心裁决机制：超过一半说没关系，全盘推翻
-        is_irrelevant = valid_chunk_count > 0 and (irrelevant_votes / valid_chunk_count >= 0.5)
-        
-        if is_irrelevant:
-            print(f"🚫 [跨界拦截]: 发现 {irrelevant_votes}/{valid_chunk_count} 的网页判定 '{query}' 与调查目标无关！")
-            clean_parts = [f"【目标偏离判定】经 {len(processed_refs)} 个网页交叉验证，实体 '{query}' 的真实领域与当前主线调查毫无关联。"]
-            status_str = "确认无关 (已跨界拦截)"
-        else:
-            status_str = "确认相关 (已完成提炼)"
+        # 4. 组装提炼结果。相关性只在原始网页结果上做静态关键词检查，不使用 SLM 输出做审查。
+        clean_parts, structured_web_facts, processed_refs = _assemble_web_search_facts(all_responses, prompt_metadata)
+
+        status_str = "确认相关 (已完成提炼)"
             
         if not clean_parts: return "[系统状态] 未能从有效网页中提取到客观事实。"
             

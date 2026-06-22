@@ -5,18 +5,33 @@ import time
 from config import get_slm_endpoint, get_slm_password
 
 class SLMClient:
-    def __init__(self):
+    def __init__(self, endpoint_override=None, password_override=None):
         self.headers = {"Content-Type": "application/json"}
+        self._endpoint_override = endpoint_override
+        self._password_override = password_override
 
     @property
     def endpoint(self):
+        if self._endpoint_override is not None:
+            return self._endpoint_override
         return get_slm_endpoint()
 
     @property
     def password(self):
+        if self._password_override is not None:
+            return self._password_override
         return get_slm_password()
 
-    def batch_generate(self, contents: list[str], tracker=None) -> list[str]:
+    def batch_generate(self, contents: list[str], tracker=None, task_id: str = None) -> list[str]:
+        if not contents:
+            return []
+        results = self._batch_generate_direct(contents)
+        if tracker:
+            for idx, text in enumerate(results):
+                tracker.track_slm(input_prompt=contents[idx], output_text=text, task_id=task_id)
+        return results
+
+    def _batch_generate_direct(self, contents: list[str]) -> list[str]:
         payload = {
             "contents": contents,
             "max_tokens": 2400,       
@@ -80,9 +95,6 @@ class SLMClient:
                         continue
 
                 final_responses = [results[i] for i in range(len(contents))]
-                if tracker:
-                    for idx, text in enumerate(final_responses):
-                        tracker.track_slm(input_prompt=contents[idx], output_text=text)
                 return final_responses
                 
             except requests.exceptions.RequestException as e:

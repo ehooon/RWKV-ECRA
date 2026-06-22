@@ -4,6 +4,7 @@ import threading
 import queue
 from datetime import datetime
 from config import TRACKING
+from utils.slm_metrics import slm_throughput_meter
 
 def fallback_serializer(obj):
     if hasattr(obj, 'model_dump'): return obj.model_dump()
@@ -37,13 +38,16 @@ class EventTracker:
             }
         })
 
-    def track_slm(self, input_prompt: str, output_text: str):
+    def track_slm(self, input_prompt: str, output_text: str, task_id: str = ""):
+        slm_throughput_meter.record(input_prompt, output_text, task_id=task_id)
+
         # 增加 enable_slm_log 判断
         if not self.enable or not TRACKING.get("enable_slm_log", False): return
         self.write_queue.put({
             "target_file": self.slm_log_file,
             "payload": {
                 "timestamp": datetime.now().isoformat(),
+                "task_id": task_id or "",
                 "prompt": input_prompt,
                 "response": output_text
             }

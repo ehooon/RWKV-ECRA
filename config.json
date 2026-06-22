@@ -51,10 +51,16 @@
     "max_error_retries": 3,
     "memory_truncate_length": 60000
   },
+  "LLM_CONFIG": {
+    "concurrency": 6
+  },
   "SLM_CONFIG": {
     "endpoint": "http://192.168.0.82:8080/v1/chat/completions",
     "password": "rwkv7_7.2b",
-    "concurrency": 128
+    "concurrency": 128,
+    "enable_async_parallel": false,
+    "async_parallelism": 2,
+    "async_batch_wait_ms": 20
   },
   "TRACKING": {
     "enable": true,
