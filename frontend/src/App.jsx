@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
+  AlertTriangle,
+  ArrowUp,
+  Check,
   ChevronDown,
   ChevronRight,
   Clock3,
@@ -418,15 +422,16 @@ function Composer({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled }) {
   }
 
   return (
-    <Card className="border-border bg-card">
-      <CardContent className="p-3">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end">
+    <div className="research-composer">
+      <div className="flex items-end gap-3">
+        <div className="min-w-0 flex-1">
           <Textarea
             ref={textareaRef}
             value={query}
-            rows={4}
-            placeholder="输入研究主题，例如：提取本地工作区中所有研报的核心逻辑并对比差异。按 Enter 发送，Shift + Enter 换行。"
-            className="min-h-[112px] resize-none border-border bg-background px-3 py-3 leading-7 shadow-none focus-visible:ring-2"
+            rows={1}
+            aria-label="输入研究任务"
+            placeholder="继续追问，或输入新的研究主题…"
+            className="min-h-11 max-h-[160px] resize-none border-0 bg-transparent px-0 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
             onChange={(event) => setQuery(event.target.value)}
             onInput={(event) => resizeTextarea(event.target)}
             onKeyDown={(event) => {
@@ -436,30 +441,33 @@ function Composer({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled }) {
               }
             }}
           />
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span>Enter 发送</span>
+            <span aria-hidden="true">·</span>
+            <span>Shift + Enter 换行</span>
+            <span aria-hidden="true">·</span>
+            <span>{asyncEnabled ? "并行模式" : isAnyRunning ? "将加入队列" : "顺序模式"}</span>
+          </div>
+        </div>
 
           <Button
-            className="h-auto min-w-32 rounded-xl px-4 py-3"
+            size="icon"
+            className="size-10 shrink-0 rounded-lg"
             disabled={isSubmitting || !query.trim()}
             onClick={handleSubmit}
+            aria-label={shouldEnqueue ? "加入排队" : "开始分析"}
+            title={shouldEnqueue ? "加入排队" : "开始分析"}
           >
             {isSubmitting ? (
               <Loader2 className="size-4 animate-spin" />
             ) : shouldEnqueue ? (
               <ListPlus className="size-4" />
             ) : (
-              <Play className="size-4" />
+              <ArrowUp className="size-4" />
             )}
-            {shouldEnqueue ? "加入排队" : "开始分析"}
           </Button>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs leading-5 text-muted-foreground">
-          <Badge variant="outline" className="rounded-md">
-            RWKV Agent
-          </Badge>
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -520,87 +528,58 @@ function TaskTimingCard({ task }) {
 
   const runTime = parseTaskTime(task.id);
   const isDone = ["completed", "failed", "ready"].includes(task.status);
+  const entries = [
+    ["排队", task.queued_at || "-"],
+    ["运行", runTime || task.updated_at || "-"],
+    ["完成", isDone ? task.updated_at || "-" : "进行中"],
+  ];
 
   return (
-    <Card className="border-border">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
+    <section className="border-b border-border pb-5">
+      <div className="flex items-center gap-2 text-sm font-semibold">
           <Clock3 className="size-4" />
           任务时间线
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 text-sm">
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-muted-foreground">提交排队</span>
-          <span className="font-mono text-xs">{task.queued_at || "-"}</span>
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-muted-foreground">开始运行</span>
-          <span className="font-mono text-xs">{runTime || task.updated_at || "-"}</span>
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <span className="text-muted-foreground">报告生成</span>
-          <span className="font-mono text-xs">{isDone ? task.updated_at || "-" : "正在执行..."}</span>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ExecutionFeed({ progress, onStop }) {
-  return (
-    <Card className="border-border bg-card">
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Workflow className="size-4" />
-            深度思考与研究执行中
-          </CardTitle>
-        </div>
-        <Button variant="outline" size="sm" onClick={onStop}>
-          <StopCircle className="size-4" />
-          中止
-        </Button>
-      </CardHeader>
-      <CardContent>
-        <ScrollArea className="h-[320px] rounded-xl border border-border bg-muted">
-          <pre className="p-4 text-xs leading-6 whitespace-pre-wrap text-foreground/80">
-            {progress || "系统正在初始化执行环境，即将启动探索..."}
-          </pre>
-        </ScrollArea>
-      </CardContent>
-    </Card>
+      </div>
+      <div className="mt-3 space-y-2">
+        {entries.map(([label, value]) => (
+          <div key={label} className="flex items-baseline justify-between gap-3 text-xs">
+            <span className="text-muted-foreground">{label}</span>
+            <span className="truncate font-mono text-[10px] tabular-nums text-foreground/70" title={value}>
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
 function MetricsStrip({ report, task }) {
-  const items = [
-    { label: "状态", value: task?.status || "-" },
-    {
-      label: "章节规模",
-      value: report?.nodes?.length || (report?.markdown ? 1 : 0),
-      suffix: "节",
-    },
-    { label: "数据来源", value: report?.sources?.length || 0, suffix: "项" },
-    { label: "最近更新", value: task?.updated_at || report?.updated_at || "-" },
-  ];
+  const sectionCount = report?.nodes?.length || (report?.markdown ? 1 : 0);
+  const sourceCount = report?.sources?.length || 0;
+  const updatedAt = task?.updated_at || report?.updated_at || "-";
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      {items.map((item) => (
-        <Card key={item.label} className="border-border bg-card">
-          <CardContent className="flex items-center justify-between px-4 py-4">
-            <div>
-              <div className="text-xs text-muted-foreground">{item.label}</div>
-              <div className="mt-2 text-sm font-medium">
-                {item.value}
-                {item.suffix ? ` ${item.suffix}` : ""}
-              </div>
-            </div>
-            {item.label === "状态" ? <TaskStatusBadge status={task?.status} /> : null}
-          </CardContent>
-        </Card>
-      ))}
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-border px-1 py-3 text-xs">
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">状态</span>
+        <TaskStatusBadge status={task?.status} className="px-1.5 py-0 text-[10px]" />
+      </div>
+      <div className="hidden h-3 w-px bg-border sm:block" aria-hidden="true" />
+      <div>
+        <span className="text-muted-foreground">章节</span>
+        <span className="ml-1.5 font-medium tabular-nums">{sectionCount}</span>
+      </div>
+      <div>
+        <span className="text-muted-foreground">来源</span>
+        <span className="ml-1.5 font-medium tabular-nums">{sourceCount}</span>
+      </div>
+      <div className="sm:ml-auto">
+        <span className="text-muted-foreground">更新于</span>
+        <span className="ml-1.5 font-mono text-[10px] tabular-nums text-foreground/70">
+          {updatedAt}
+        </span>
+      </div>
     </div>
   );
 }
@@ -612,104 +591,171 @@ function OutlinePanel({ report, markdown }) {
         title: node.title || `章节 ${index + 1}`,
       }))
     : extractMarkdownOutline(markdown);
+  const [activeSectionId, setActiveSectionId] = useState(items[0]?.id || "");
+  const outlineRef = useRef(null);
+
+  useEffect(() => {
+    if (!items.length) {
+      setActiveSectionId("");
+      return undefined;
+    }
+
+    setActiveSectionId(items[0].id);
+
+    const sections = items
+      .map((item) => document.getElementById(item.id))
+      .filter(Boolean);
+
+    if (!sections.length || typeof IntersectionObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+
+        if (visible.length) {
+          setActiveSectionId(visible[0].target.id);
+        }
+      },
+      {
+        rootMargin: "-12% 0px -72% 0px",
+        threshold: 0,
+      },
+    );
+
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [items.map((item) => item.id).join("|")]);
+
+  useEffect(() => {
+    const activeLink = outlineRef.current?.querySelector('[aria-current="location"]');
+    activeLink?.scrollIntoView({ block: "nearest" });
+  }, [activeSectionId]);
 
   return (
-    <Card className="sticky top-20 hidden border-border xl:block">
-      <CardHeader>
-        <CardTitle className="text-base">大纲导航</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ScrollArea className="h-[60vh] pr-4">
-          {items.length ? (
-            <div className="space-y-1">
-              {items.map((item) => (
-                <a
-                  key={item.id}
-                  href={`#${item.id}`}
-                  className="block rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    <aside className="sticky top-5 hidden max-h-[calc(100vh-7rem)] self-start overflow-hidden border-r border-border pr-4 2xl:block">
+      <div className="mb-3 text-xs font-semibold text-foreground">目录</div>
+      <ScrollArea className="max-h-[calc(100vh-10rem)]">
+        {items.length ? (
+          <nav ref={outlineRef} className="space-y-0.5 pr-3" aria-label="报告目录">
+            {items.map((item, index) => (
+              <a
+                key={item.id}
+                href={`#${item.id}`}
+                aria-current={activeSectionId === item.id ? "location" : undefined}
+                className={cn(
+                  "group flex gap-2 rounded-md px-1.5 py-1.5 text-xs leading-5 transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                  activeSectionId === item.id
+                    ? "bg-muted font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                )}
+              >
+                <span
+                  className={cn(
+                    "w-4 shrink-0 font-mono text-[9px] tabular-nums",
+                    activeSectionId === item.id ? "text-primary" : "text-foreground/35",
+                  )}
                 >
-                  {item.title}
-                </a>
-              ))}
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">无大纲</div>
-          )}
-        </ScrollArea>
-      </CardContent>
-    </Card>
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span>{item.title}</span>
+              </a>
+            ))}
+          </nav>
+        ) : (
+          <div className="text-xs text-muted-foreground">无目录</div>
+        )}
+      </ScrollArea>
+    </aside>
   );
 }
 
 function SourcesPanel({ sources = [] }) {
   return (
-    <Card className="border-border">
-      <CardHeader>
-        <CardTitle className="text-base">溯源索引</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ScrollArea className="h-[52vh] pr-4">
-          {sources.length ? (
-            <div className="space-y-3">
-              {sources.map((source) => (
-                <div
-                  key={`${source.index}-${source.title}`}
-                  id={`source-${source.index}`}
-                  className="source-anchor rounded-xl border border-border bg-muted/60 p-3"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <Badge variant="outline" className="rounded-md">
-                      [{source.index}]
-                    </Badge>
-                    <Badge variant="outline" className="rounded-md text-muted-foreground">
-                      {source.type === "web" ? "互联网检索" : "本地工作区文件"}
-                    </Badge>
-                  </div>
-                  <div className="mt-3 text-sm leading-6">
-                    {source.url ? (
-                      <a
-                        href={source.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-foreground underline decoration-border underline-offset-4 hover:text-muted-foreground"
-                      >
-                        {source.title || source.url}
-                      </a>
-                    ) : (
-                      <span>{source.title || "内部文档"}</span>
-                    )}
-                  </div>
+    <section>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold">引用来源</h2>
+        <span className="text-[10px] tabular-nums text-muted-foreground">{sources.length}</span>
+      </div>
+      <ScrollArea className="mt-3 max-h-[calc(100vh-19rem)]">
+        {sources.length ? (
+          <div className="divide-y divide-border pr-3">
+            {sources.map((source) => (
+              <div
+                key={`${source.index}-${source.title}`}
+                id={`source-${source.index}`}
+                className="source-anchor py-3 first:pt-0"
+              >
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span className="font-mono">[{source.index}]</span>
+                  <span>{source.type === "web" ? "网页" : "本地文件"}</span>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-sm text-muted-foreground">无引用来源</div>
-          )}
-        </ScrollArea>
-      </CardContent>
-    </Card>
+                <div className="mt-1.5 line-clamp-3 break-words text-xs leading-5 text-foreground/80">
+                  {source.url ? (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="decoration-border underline-offset-4 hover:underline"
+                    >
+                      {source.title || source.url}
+                    </a>
+                  ) : (
+                    <span>{source.title || "内部文档"}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-muted-foreground">无引用来源</div>
+        )}
+      </ScrollArea>
+    </section>
   );
 }
 
 function ReportSurface({ report }) {
   if (!report) return null;
 
+  function isMissingNodeContent(content) {
+    return /生成异常|内容丢失|生成失败|missing content/i.test(String(content || ""));
+  }
+
   return (
-    <Card className="border-border bg-card">
-      <CardContent className="px-6 py-6 md:px-8 md:py-8">
+    <main className="min-w-0 border-x border-border bg-card">
+      <div className="mx-auto max-w-[82ch] px-7 py-8 md:px-10 md:py-10">
         {report.nodes?.length ? (
-          <article className="space-y-12">
+          <article className="space-y-14">
             {report.nodes.map((node, index) => (
-              <section key={node.id || index} id={`node-${index}`} className="scroll-mt-24 space-y-5">
-                <div className="border-b border-border pb-4">
-                  <h2 className="text-2xl font-medium tracking-tight">
+              <section key={node.id || index} id={`node-${index}`} className="scroll-mt-20">
+                <div className="mb-6 flex items-start gap-3 border-b border-border pb-4">
+                  <span className="pt-1 font-mono text-[10px] tabular-nums text-muted-foreground">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <h2 className="text-[22px] font-semibold leading-8 tracking-[-0.02em] text-foreground">
                     {node.title || `章节 ${index + 1}`}
                   </h2>
                 </div>
-                <div
-                  className="report-markdown"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(node.content || "") }}
-                />
+                {isMissingNodeContent(node.content) ? (
+                  <div className="flex gap-3 rounded-md bg-amber-50 px-4 py-3 text-amber-950">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700" aria-hidden="true" />
+                    <div>
+                      <div className="text-sm font-medium">本章节未能生成完整内容</div>
+                      <p className="mt-1 text-xs leading-5 text-amber-900/75">
+                        其余章节不受影响。可重新运行任务以补全本节。
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="report-markdown"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(node.content || "") }}
+                  />
+                )}
               </section>
             ))}
           </article>
@@ -718,10 +764,83 @@ function ReportSurface({ report }) {
             <div dangerouslySetInnerHTML={{ __html: renderMarkdown(report.markdown || "") }} />
           </article>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </main>
   );
 }
+
+function parseExecutionProgress(progress) {
+  const lines = String(progress || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return [{ type: "active", content: "正在初始化执行环境，准备检索工作区与规划研究路径…" }];
+  }
+
+  return lines.map((line, index) => {
+    const isError = /异常|错误|failed|error|cannot access|❌/i.test(line);
+    const isDone = /完成|就绪|成功|✅/i.test(line);
+    return {
+      type: isError ? "error" : isDone ? "done" : index === lines.length - 1 ? "active" : "neutral",
+      content: line.replace(/^[🚀❌✅]\s*/, ""),
+    };
+  });
+}
+
+function ExecutionFeed({ progress, onStop, task }) {
+  const entries = parseExecutionProgress(progress);
+  const errorCount = entries.filter((entry) => entry.type === "error").length;
+  const startedAt = parseTaskTime(task?.id) || task?.updated_at || "刚刚";
+
+  return (
+    <section className="execution-workspace" aria-label="研究执行状态">
+      <div className="execution-header">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2.5">
+            <span className="running-indicator" aria-hidden="true" />
+            <h1 className="truncate text-base font-semibold">深度研究执行中</h1>
+            <span className="text-xs font-medium text-amber-700">运行中</span>
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            RWKV Agent · 开始于 {startedAt}
+            {errorCount ? ` · 已记录 ${errorCount} 个异常` : ""}
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" className="rounded-md text-muted-foreground" onClick={onStop}>
+          <StopCircle className="size-4" />
+          中止
+        </Button>
+      </div>
+
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="execution-timeline">
+          {entries.map((entry, index) => (
+            <div className="execution-entry" key={`${entry.content}-${index}`}>
+              <div className={cn("execution-marker", `is-${entry.type}`)}>
+                {entry.type === "error" ? (
+                  <X className="size-3.5" />
+                ) : entry.type === "done" ? (
+                  <Check className="size-3.5" />
+                ) : entry.type === "active" ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Activity className="size-3.5" />
+                )}
+              </div>
+              <div className={cn("execution-message", entry.type === "error" && "is-error")}>
+                <span className="execution-index">{String(index + 1).padStart(2, "0")}</span>
+                <p>{entry.content}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </ScrollArea>
+    </section>
+  );
+}
+
 
 function LandingState() {
   return (
@@ -1010,7 +1129,7 @@ export function App() {
 
   return (
     <>
-      <SidebarProvider defaultOpen style={{ "--sidebar-width": "18rem" }}>
+      <SidebarProvider defaultOpen style={{ "--sidebar-width": "16rem" }}>
         <AppSidebar
           history={history}
           activeId={activeId}
@@ -1025,8 +1144,8 @@ export function App() {
           onAsyncEnabledChange={handleAsyncEnabledChange}
         />
 
-        <SidebarInset>
-          <header className="sticky top-0 z-20 border-b border-border bg-background">
+        <SidebarInset className="h-svh max-h-svh min-h-0 overflow-hidden">
+          <header className="z-20 shrink-0 border-b border-border bg-background">
             <div className="grid h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center">
               <div className="flex h-11 items-center border-r border-border px-2.5">
                 <SidebarTrigger className="size-8 rounded-md" />
@@ -1070,8 +1189,8 @@ export function App() {
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto">
-            <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-6 px-4 py-6 md:px-6 lg:px-8">
+          <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div className="mx-auto flex min-h-full w-full max-w-[1680px] flex-col gap-5 px-5 py-5 md:px-8 lg:px-10">
               {error ? (
                 <Card className="border-rose-200 bg-rose-50 text-rose-700">
                   <CardContent className="px-4 py-3 text-sm">{error}</CardContent>
@@ -1092,6 +1211,7 @@ export function App() {
                 <ExecutionFeed
                   progress={activeTaskItem.progress}
                   onStop={() => handleStopTask(activeTaskItem.id)}
+                  task={activeTaskItem}
                 />
               ) : null}
 
@@ -1099,32 +1219,38 @@ export function App() {
                 <ExecutionFeed
                   progress={runningTask.progress}
                   onStop={() => handleStopTask(runningTask.id)}
+                  task={runningTask}
                 />
               ) : null}
 
               {!activeId && !isAnyRunning ? <LandingState /> : null}
 
               {report ? (
-                <div className="space-y-6">
+                <div className="space-y-4">
                   <MetricsStrip report={report} task={activeTaskItem} />
 
-                  <div className="grid gap-6 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+                  <div className="grid items-start 2xl:grid-cols-[220px_minmax(0,1fr)_292px]">
                     <OutlinePanel report={report} markdown={markdown} />
 
                     <ReportSurface report={report} />
 
-                    <div className="space-y-6">
+                    <aside className="sticky top-5 hidden max-h-[calc(100vh-7rem)] self-start overflow-hidden pl-5 2xl:block">
                       <TaskTimingCard task={activeTaskItem} />
                       <SourcesPanel sources={report?.sources || []} />
-                    </div>
+                    </aside>
+                  </div>
+
+                  <div className="grid gap-6 border-t border-border pt-5 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] 2xl:hidden">
+                    <TaskTimingCard task={activeTaskItem} />
+                    <SourcesPanel sources={report?.sources || []} />
                   </div>
                 </div>
               ) : null}
             </div>
-          </div>
+          </main>
 
-          <div className="sticky bottom-0 border-t border-border bg-background px-4 py-4 md:px-6 lg:px-8">
-            <div className="mx-auto w-full max-w-5xl">
+          <div className="z-20 shrink-0 bg-background px-5 py-3 md:px-8 lg:px-10">
+            <div className="mx-auto w-full max-w-4xl">
               <Composer
                 onSubmit={handleQuerySubmit}
                 isAnyRunning={isAnyRunning}

@@ -1,3 +1,12 @@
+import {
+  Check,
+  Clock3,
+  LoaderCircle,
+  Minus,
+  Square,
+  X,
+} from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -19,9 +28,67 @@ const STATUS_LABELS = {
   stopped: "已停止",
 };
 
+const STATUS_INDICATORS = {
+  completed: {
+    className: "bg-emerald-500 text-white",
+    icon: Check,
+  },
+  ready: {
+    className: "bg-emerald-500 text-white",
+    icon: Check,
+  },
+  running: {
+    className: "bg-amber-400 text-amber-950",
+    icon: LoaderCircle,
+  },
+  failed: {
+    className: "bg-rose-500 text-white",
+    icon: X,
+  },
+  queued: {
+    className: "bg-stone-300 text-stone-700",
+    icon: Clock3,
+  },
+  stopped: {
+    className: "bg-stone-300 text-stone-700",
+    icon: Square,
+  },
+};
+
 export function getTaskStatusLabel(status) {
   const normalized = String(status || "ready").toLowerCase();
   return STATUS_LABELS[normalized] || normalized;
+}
+
+export function TaskStatusIndicator({ status, className }) {
+  const normalized = String(status || "ready").toLowerCase();
+  const config = STATUS_INDICATORS[normalized] || {
+    className: "bg-stone-300 text-stone-700",
+    icon: Minus,
+  };
+  const Icon = config.icon;
+  const label = getTaskStatusLabel(normalized);
+
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className={cn(
+        "inline-flex size-3 shrink-0 items-center justify-center rounded-[4px]",
+        config.className,
+        className,
+      )}
+    >
+      <Icon
+        className={cn(
+          "size-2 stroke-[2.75]",
+          normalized === "running" && "animate-spin motion-reduce:animate-none",
+        )}
+        aria-hidden="true"
+      />
+    </span>
+  );
 }
 
 export function TaskStatusBadge({ status, className }) {

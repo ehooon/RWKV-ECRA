@@ -30,6 +30,16 @@ function withHeadingIds(html) {
   });
 }
 
+function withCitationClusters(html) {
+  return html.replace(
+    /<p>((?:\s*<a[^>]*class="citation-badge (?:web|local)"[^>]*><span>\[\d+\]<\/span><\/a>)+\s*)<\/p>/g,
+    (_, citations) => {
+      const count = (citations.match(/class="citation-badge/g) || []).length;
+      return `<details class="citation-cluster"><summary>本节引用 <span>${count}</span></summary><div class="citation-cluster-items">${citations}</div></details>`;
+    },
+  );
+}
+
 export function renderMarkdown(markdown) {
   let text = String(markdown || "");
   
@@ -44,7 +54,7 @@ export function renderMarkdown(markdown) {
   // 处理本地文档角标 ^{1}^
   text = text.replace(/\^\{(\d+)\}\^/g, '<a href="#source-$1" class="citation-badge local" title="跳转至本地文档来源"><span>[$1]</span></a>');
 
-  const html = withHeadingIds(marked.parse(text));
+  const html = withCitationClusters(withHeadingIds(marked.parse(text)));
   // DOMPurify 默认允许 <a> 和 <strong> 等安全标签属性
   return DOMPurify.sanitize(html);
 }
