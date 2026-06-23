@@ -1019,7 +1019,7 @@ export function App() {
 
   return (
     <>
-      <SidebarProvider defaultOpen>
+      <SidebarProvider defaultOpen style={{ "--sidebar-width": "18rem" }}>
         <AppSidebar
           history={history}
           activeId={activeId}
