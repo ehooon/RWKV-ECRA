@@ -10,8 +10,10 @@ import {
   Copy,
   File,
   FileText,
+  Files,
   Folder,
   FolderOpen,
+  Gauge,
   Loader2,
   ListPlus,
   Play,
@@ -25,7 +27,6 @@ import {
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
-import ArchitectureGraph from "./ArchitectureGraph.jsx";
 import { getHistory, getReport, startAnalyze, stopTask, deleteTask, getFiles, deleteFile, getFileContent, uploadFile, getRuntimeConfig } from "./api.js";
 import { extractMarkdownOutline, renderMarkdown, reportToMarkdown } from "./markdown.js";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -51,6 +52,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
@@ -401,10 +403,18 @@ function FileManager() {
   );
 }
 
-function Composer({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled }) {
+function Composer({
+  onSubmit,
+  isAnyRunning,
+  isSubmitting,
+  asyncEnabled,
+  variant = "compact",
+  onOpenFiles,
+}) {
   const [query, setQuery] = useState("");
   const textareaRef = useRef(null);
   const shouldEnqueue = !asyncEnabled && isAnyRunning;
+  const isCreateMode = variant === "create";
 
   function resizeTextarea(target) {
     target.style.height = "auto";
@@ -422,16 +432,32 @@ function Composer({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled }) {
   }
 
   return (
-    <div className="research-composer">
-      <div className="flex items-end gap-3">
+    <div className={cn("research-composer", isCreateMode && "research-composer-create")}>
+      {isCreateMode ? (
+        <label htmlFor="new-research-query" className="mb-2 block text-sm font-medium text-foreground">
+          研究主题
+        </label>
+      ) : null}
+
+      <div className={cn("flex gap-3", isCreateMode ? "flex-col" : "items-end")}>
         <div className="min-w-0 flex-1">
           <Textarea
+            id={isCreateMode ? "new-research-query" : undefined}
             ref={textareaRef}
             value={query}
-            rows={1}
+            rows={isCreateMode ? 5 : 1}
             aria-label="输入研究任务"
-            placeholder="继续追问，或输入新的研究主题…"
-            className="min-h-11 max-h-[160px] resize-none border-0 bg-transparent px-0 py-2.5 text-[15px] leading-6 shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
+            placeholder={
+              isCreateMode
+                ? "描述你希望研究的问题、范围与输出要求"
+                : "继续追问，或输入新的研究主题…"
+            }
+            className={cn(
+              "resize-none bg-transparent text-[15px] leading-6 shadow-none placeholder:text-muted-foreground",
+              isCreateMode
+                ? "min-h-36 max-h-[240px] rounded-md border-border px-3 py-3 focus-visible:ring-2"
+                : "min-h-11 max-h-[160px] border-0 px-0 py-2.5 focus-visible:ring-0",
+            )}
             onChange={(event) => setQuery(event.target.value)}
             onInput={(event) => resizeTextarea(event.target)}
             onKeyDown={(event) => {
@@ -441,18 +467,53 @@ function Composer({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled }) {
               }
             }}
           />
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span>Enter 发送</span>
-            <span aria-hidden="true">·</span>
-            <span>Shift + Enter 换行</span>
-            <span aria-hidden="true">·</span>
-            <span>{asyncEnabled ? "并行模式" : isAnyRunning ? "将加入队列" : "顺序模式"}</span>
-          </div>
+
+          {!isCreateMode ? (
+            <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span>Enter 发送</span>
+              <span aria-hidden="true">·</span>
+              <span>Shift + Enter 换行</span>
+              <span aria-hidden="true">·</span>
+              <span>{asyncEnabled ? "并行模式" : isAnyRunning ? "将加入队列" : "顺序模式"}</span>
+            </div>
+          ) : null}
         </div>
 
+        {isCreateMode ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <button
+                type="button"
+                onClick={onOpenFiles}
+                className="inline-flex min-h-8 items-center gap-2 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Files className="size-3.5" />
+                选择工作区资料
+              </button>
+              <span className="text-[11px] text-muted-foreground">
+                未选择时使用工作区可用文件
+              </span>
+            </div>
+            <Button
+              size="sm"
+              className="h-9 shrink-0 rounded-md px-4"
+              disabled={isSubmitting || !query.trim()}
+              onClick={handleSubmit}
+            >
+              {isSubmitting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : shouldEnqueue ? (
+                <ListPlus className="size-4" />
+              ) : (
+                <ArrowUp className="size-4" />
+              )}
+              {shouldEnqueue ? "加入队列" : "开始分析"}
+            </Button>
+          </div>
+        ) : (
           <Button
-            size="icon"
-            className="size-10 shrink-0 rounded-lg"
+            size={isCreateMode ? "default" : "icon"}
+            className="size-10 shrink-0 rounded-md"
             disabled={isSubmitting || !query.trim()}
             onClick={handleSubmit}
             aria-label={shouldEnqueue ? "加入排队" : "开始分析"}
@@ -466,6 +527,7 @@ function Composer({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled }) {
               <ArrowUp className="size-4" />
             )}
           </Button>
+        )}
       </div>
     </div>
   );
@@ -842,47 +904,57 @@ function ExecutionFeed({ progress, onStop, task }) {
 }
 
 
-function LandingState() {
+function LandingState({
+  onSubmit,
+  isAnyRunning,
+  isSubmitting,
+  asyncEnabled,
+  onAsyncEnabledChange,
+  onOpenFiles,
+}) {
   return (
-    <div className="space-y-6">
-      <Card className="border-border bg-card">
-        <CardContent className="grid gap-6 px-6 py-8 lg:grid-cols-[1.2fr_0.8fr] lg:px-8">
-          <div className="space-y-4">
-            <div>
-              <h1 className="text-3xl font-medium tracking-tight md:text-4xl">
-                开启 RWKV 长文本研究
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-7 text-muted-foreground md:text-base">
-                上传资料并输入研究主题，即可开始分析。
-              </p>
-            </div>
-          </div>
+    <div className="flex min-h-[calc(100vh-12rem)] items-start justify-center pt-[10vh]">
+      <section className="w-full max-w-3xl">
+        <header className="mb-6">
+          <h1 className="text-2xl font-semibold tracking-[-0.025em]">新建研究任务</h1>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            描述研究目标，系统将结合工作区资料生成结构化报告。
+          </p>
+        </header>
 
-          <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-            {[
-              {
-                title: "本地资料接入",
-                desc: "支持 Markdown、文本和图片。",
-              },
-              {
-                title: "任务编排",
-                desc: "支持排队和异步并行。",
-              },
-              {
-                title: "结构化报告",
-                desc: "输出章节化结果与引用索引。",
-              },
-            ].map((item) => (
-              <div key={item.title} className="rounded-xl border border-border bg-muted/60 p-4">
-                <div className="text-sm font-medium">{item.title}</div>
-                <div className="mt-2 text-sm leading-6 text-muted-foreground">{item.desc}</div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        <Composer
+          variant="create"
+          onSubmit={onSubmit}
+          isAnyRunning={isAnyRunning}
+          isSubmitting={isSubmitting}
+          asyncEnabled={asyncEnabled}
+          onOpenFiles={onOpenFiles}
+        />
 
-      <ArchitectureGraph />
+        <div className="mt-4 flex items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={onOpenFiles}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <FolderOpen className="size-3.5" />
+              文件目录
+            </button>
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <Gauge className="size-3.5" />
+              <span>{asyncEnabled ? "并行模式" : "顺序模式"}</span>
+              <Switch
+                checked={asyncEnabled}
+                onCheckedChange={onAsyncEnabledChange}
+                aria-label="切换异步并行"
+                className="scale-[0.8]"
+              />
+            </label>
+          </div>
+          <span>Enter 开始 · Shift + Enter 换行</span>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1139,9 +1211,6 @@ export function App() {
           onNewRun={handleNewRun}
           onStop={handleStopTask}
           onDelete={handleDeleteTask}
-          onOpenFiles={() => setFileManagerOpen(true)}
-          asyncEnabled={asyncEnabled}
-          onAsyncEnabledChange={handleAsyncEnabledChange}
         />
 
         <SidebarInset className="h-svh max-h-svh min-h-0 overflow-hidden">
@@ -1159,16 +1228,6 @@ export function App() {
               </div>
 
               <div className="flex items-center gap-0.5 px-2.5">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="hidden rounded-md md:inline-flex"
-                  title="工作区文件"
-                  aria-label="打开工作区文件"
-                  onClick={() => setFileManagerOpen(true)}
-                >
-                  <FolderOpen className="size-4" />
-                </Button>
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -1223,7 +1282,16 @@ export function App() {
                 />
               ) : null}
 
-              {!activeId && !isAnyRunning ? <LandingState /> : null}
+              {!activeId && !isAnyRunning ? (
+                <LandingState
+                  onSubmit={handleQuerySubmit}
+                  isAnyRunning={isAnyRunning}
+                  isSubmitting={isSubmitting}
+                  asyncEnabled={asyncEnabled}
+                  onAsyncEnabledChange={handleAsyncEnabledChange}
+                  onOpenFiles={() => setFileManagerOpen(true)}
+                />
+              ) : null}
 
               {report ? (
                 <div className="space-y-4">
@@ -1249,16 +1317,18 @@ export function App() {
             </div>
           </main>
 
-          <div className="z-20 shrink-0 bg-background px-5 py-3 md:px-8 lg:px-10">
-            <div className="mx-auto w-full max-w-4xl">
-              <Composer
-                onSubmit={handleQuerySubmit}
-                isAnyRunning={isAnyRunning}
-                isSubmitting={isSubmitting}
-                asyncEnabled={asyncEnabled}
-              />
+          {activeId || isAnyRunning ? (
+            <div className="z-20 shrink-0 bg-background px-5 py-3 md:px-8 lg:px-10">
+              <div className="mx-auto w-full max-w-4xl">
+                <Composer
+                  onSubmit={handleQuerySubmit}
+                  isAnyRunning={isAnyRunning}
+                  isSubmitting={isSubmitting}
+                  asyncEnabled={asyncEnabled}
+                />
+              </div>
             </div>
-          </div>
+          ) : null}
         </SidebarInset>
 
         <Dialog open={fileManagerOpen} onOpenChange={setFileManagerOpen}>

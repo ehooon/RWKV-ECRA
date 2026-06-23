@@ -1,8 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   Files,
-  FolderOpen,
-  Gauge,
   Search,
   SquarePen,
   StopCircle,
@@ -22,7 +20,6 @@ import {
   SidebarHeader,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
 function getTaskLabel(item) {
@@ -77,9 +74,6 @@ export function AppSidebar({
   onNewRun,
   onStop,
   onDelete,
-  onOpenFiles,
-  asyncEnabled,
-  onAsyncEnabledChange,
   ...props
 }) {
   const deferredKeyword = useDeferredValue(keyword);
@@ -129,28 +123,6 @@ export function AppSidebar({
             <SquarePen className="size-3.5" />
             新建任务
           </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="size-8 rounded-md"
-            title="本地工作区文件"
-            aria-label="打开本地工作区文件"
-            onClick={onOpenFiles}
-          >
-            <FolderOpen className="size-3.5" />
-          </Button>
-          <div
-            className="flex h-8 items-center gap-1.5 rounded-md px-1.5 text-sidebar-foreground/65"
-            title="异步并行"
-          >
-            <Gauge className="size-3.5" aria-hidden="true" />
-            <Switch
-              checked={asyncEnabled}
-              onCheckedChange={onAsyncEnabledChange}
-              aria-label="切换异步并行"
-              className="scale-90"
-            />
-          </div>
         </div>
 
         <div className="relative">
@@ -168,7 +140,7 @@ export function AppSidebar({
 
       <SidebarContent className="overflow-y-auto">
         <SidebarGroup className="min-h-0 gap-0 p-0">
-          <div className="sticky top-0 z-10 flex h-8 items-center justify-between border-b border-sidebar-border bg-sidebar px-3">
+          {/* <div className="sticky top-0 z-10 flex h-8 items-center justify-between border-b border-sidebar-border bg-sidebar px-3">
             <div className="flex items-center gap-1.5 text-[11px] font-medium text-sidebar-foreground/60">
               <Files className="size-3.5" aria-hidden="true" />
               任务
@@ -176,7 +148,7 @@ export function AppSidebar({
             <span className="text-[11px] tabular-nums text-sidebar-foreground/45">
               {filtered.length}
             </span>
-          </div>
+          </div> */}
 
           <div className="px-1.5 py-1.5">
             {filtered.length ? (
