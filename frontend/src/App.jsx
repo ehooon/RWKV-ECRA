@@ -42,7 +42,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   SidebarInset,
   SidebarProvider,
@@ -1009,14 +1008,6 @@ export function App() {
     ? getTaskLabel(activeTaskItem)
     : "准备新的研究任务";
 
-  const currentSubtitle = activeId
-    ? activeTaskItem?.status === "running"
-      ? "任务执行中"
-      : report?.kind === "markdown"
-        ? "Markdown 报告"
-        : "结构化报告"
-    : "";
-
   return (
     <>
       <SidebarProvider defaultOpen style={{ "--sidebar-width": "18rem" }}>
@@ -1036,30 +1027,41 @@ export function App() {
 
         <SidebarInset>
           <header className="sticky top-0 z-20 border-b border-border bg-background">
-            <div className="mx-auto flex h-16 w-full max-w-[1680px] items-center gap-3 px-4 md:px-6 lg:px-8">
-              <SidebarTrigger />
-              <Separator orientation="vertical" className="hidden h-6 md:block" />
-
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium">{currentTitle}</div>
-                {currentSubtitle ? (
-                  <div className="truncate text-xs text-muted-foreground">
-                    {currentSubtitle}
-                  </div>
-                ) : null}
+            <div className="grid h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center">
+              <div className="flex h-11 items-center border-r border-border px-2.5">
+                <SidebarTrigger className="size-8 rounded-md" />
               </div>
 
-              <div className="flex items-center gap-2">
-                <Button variant="outline" className="hidden rounded-lg md:inline-flex" onClick={() => setFileManagerOpen(true)}>
+              <div
+                className="min-w-0 truncate px-3 text-[13px] font-medium"
+                title={currentTitle}
+              >
+                {currentTitle}
+              </div>
+
+              <div className="flex items-center gap-0.5 px-2.5">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="hidden rounded-md md:inline-flex"
+                  title="工作区文件"
+                  aria-label="打开工作区文件"
+                  onClick={() => setFileManagerOpen(true)}
+                >
                   <FolderOpen className="size-4" />
-                  工作区文件
                 </Button>
-                <Button variant="outline" className="rounded-lg" onClick={() => refreshHistory(false)}>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-md"
+                  title="刷新任务"
+                  aria-label="刷新任务"
+                  onClick={() => refreshHistory(false)}
+                >
                   <RefreshCw className="size-4" />
-                  <span className="hidden sm:inline">刷新</span>
                 </Button>
                 {report ? (
-                  <Button className="rounded-lg" onClick={copyMarkdown}>
+                  <Button size="sm" className="ml-1 rounded-md" onClick={copyMarkdown}>
                     <Copy className="size-4" />
                     <span className="hidden sm:inline">复制报告</span>
                   </Button>
