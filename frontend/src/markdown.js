@@ -7,6 +7,39 @@ marked.setOptions({
   gfm: true,
 });
 
+function slugifyHeading(text) {
+  return String(text || "")
+    .replace(/<[^>]+>/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\u4e00-\u9fa5\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+}
+
+function withHeadingIds(html) {
+  const counts = new Map();
+
+  return html.replace(/<(h[1-3])>(.*?)<\/\1>/g, (_, tag, content) => {
+    const base = slugifyHeading(content) || "section";
+    const count = counts.get(base) || 0;
+    counts.set(base, count + 1);
+    const id = count ? `${base}-${count}` : base;
+
+    return `<${tag} id="${id}">${content}</${tag}>`;
+  });
+}
+
+function withCitationClusters(html) {
+  return html.replace(
+    /<p>((?:\s*<a[^>]*class="citation-badge (?:web|local)"[^>]*><span>\[\d+\]<\/span><\/a>)+\s*)<\/p>/g,
+    (_, citations) => {
+      const count = (citations.match(/class="citation-badge/g) || []).length;
+      return `<details class="citation-cluster"><summary>本节引用 <span>${count}</span></summary><div class="citation-cluster-items">${citations}</div></details>`;
+    },
+  );
+}
+
 export function renderMarkdown(markdown) {
   let text = String(markdown || "");
   
@@ -21,7 +54,7 @@ export function renderMarkdown(markdown) {
   // 处理本地文档角标 ^{1}^
   text = text.replace(/\^\{(\d+)\}\^/g, '<a href="#source-$1" class="citation-badge local" title="跳转至本地文档来源"><span>[$1]</span></a>');
 
-  const html = marked.parse(text);
+  const html = withCitationClusters(withHeadingIds(marked.parse(text)));
   // DOMPurify 默认允许 <a> 和 <strong> 等安全标签属性
   return DOMPurify.sanitize(html);
 }
@@ -35,10 +68,22 @@ export function reportToMarkdown(report) {
 }
 
 export function extractMarkdownOutline(markdown) {
+  const counts = new Map();
+
   return String(markdown || "")
     .split("\n")
     .map((line) => /^(#{1,3})\s+(.+)$/.exec(line.trim()))
     .filter(Boolean)
     .slice(0, 30)
-    .map((match, index) => ({ id: `md-heading-${index}`, title: match[2] }));
+    .map((match) => {
+      const title = match[2];
+      const base = slugifyHeading(title) || "section";
+      const count = counts.get(base) || 0;
+      counts.set(base, count + 1);
+
+      return {
+        id: count ? `${base}-${count}` : base,
+        title,
+      };
+    });
 }
