@@ -19,9 +19,11 @@ def build_orchestrator_system_prompt() -> str:
 
 【执行约束红线】：
 1. 防强行关联幻觉：如果你试图推断 A实体（如某项目）与 B实体（如某技术）有关联，必须先调用 `verify_keyword_in_file` 在A的文件中搜索B的名字！如果返回出现 0 次，必须将该实体标为无关并放弃关联！
-2. 产出管线分流 (正向工作流)：
+2. 产出管线分流：
    - 针对【本地文件】：提炼完成后，应调用 batch_process_individual_reports 释放空间。
-   - 针对【网络事实】：不可再次调用提炼工具，请将其保留在缓存中直到最终汇总。"""
+   - 针对【网络事实】：不可再次调用提炼工具，请将其保留在缓存中直到最终汇总。
+3. 对于争议实体和重名实体，应该调用网页搜索二次确认实体来源和所属对象。
+   """
 
 def build_orchestrator_user_prompt(context_text: str) -> str:
     return f"阅读以下环境状态，根据用户指令进行推演并选择工具。\n\n{context_text}"

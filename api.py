@@ -13,6 +13,7 @@ import config
 from agent.orchestrator import Orchestrator
 from utils.task_manager import record_task, get_all_tasks, request_stop, delete_task, is_task_stopped
 from main import setup_env
+import glob
 
 setup_env()
 
@@ -205,24 +206,49 @@ def delete_task_endpoint(task_id: str):
     delete_task(task_id)
     return {"code": 200, "message": f"任务 {task_id} 及其数据已被物理删除"}
 
+
+
 @app.get("/frontend-api/history/{task_id}/report")
 def get_task_report(task_id: str):
     if not task_id or task_id == "undefined":
         return {"code": 404, "message": "无有效的任务 ID 供查询"}
         
     task_output_dir = os.path.join(config.DATA_PIPELINE["output_directory"], task_id)
-    jsonl_path = os.path.join(task_output_dir, f"{task_id}_03_结构化溯源数据.jsonl")
-    
-    if not os.path.exists(jsonl_path):
-        return {"code": 404, "message": "该任务未生成结构化报告，可能仍在执行中"}
+    if not os.path.exists(task_output_dir):
+        return {"code": 404, "message": "报告文件夹在物理系统上已丢失或被移除"}
         
-    report_data = []
-    with open(jsonl_path, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                report_data.append(json.loads(line.strip()))
-                
-    return {"code": 200, "data": report_data}
+    jsonl_candidates = []
+    md_candidates = []
+    
+    # 🌟 强力扫描：无视文件夹特殊字符，遍历查找内部所有的 JSONL 和 MD
+    for root_dir, _, files in os.walk(task_output_dir):
+        for f in files:
+            full_path = os.path.join(root_dir, f)
+            if f.endswith(".jsonl"):
+                jsonl_candidates.append(full_path)
+            elif f.endswith(".md"):
+                md_candidates.append(full_path)
+
+    # 优先解析结构化 JSONL 数据
+    if jsonl_candidates:
+        # 按照修改时间排序，取最新的
+        target = sorted(jsonl_candidates, key=os.path.getmtime, reverse=True)[0]
+        report_data = []
+        with open(target, "r", encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    report_data.append(json.loads(line.strip()))
+        return {"code": 200, "data": report_data}
+        
+    # 降级：只有 Markdown，自动包装并下发给前端
+    if md_candidates:
+        target = sorted(md_candidates, key=os.path.getmtime, reverse=True)[0]
+        with open(target, "r", encoding="utf-8") as f:
+            md_content = f.read()
+        return {"code": 200, "data": [{"record_type": "final_beautified_markdown", "content": md_content}]}
+
+    # 🚨 注意：如果文件夹是空的，会报这句新的提示。
+    return {"code": 404, "message": "系统已扫描文件夹，但未发现任何 JSONL 或 MD 格式的报告"}
 
 if __name__ == "__main__":
     print("[系统] API 服务启动中... 监听: http://0.0.0.0:8787")

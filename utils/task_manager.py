@@ -14,10 +14,10 @@ class TaskStore:
         self._task_index = {}
         self._ordered_keys = []
         self._load()
+        self._sync_with_filesystem()
 
     def _load(self):
-        if not os.path.exists(self.filepath):
-            return
+        if not os.path.exists(self.filepath): return
         with open(self.filepath, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -33,11 +33,70 @@ class TaskStore:
                             self._task_index[tid].update(record)
                         
                         if self._task_index[tid].get('status') == 'deleted':
-                            if tid in self._ordered_keys:
-                                self._ordered_keys.remove(tid)
+                            if tid in self._ordered_keys: self._ordered_keys.remove(tid)
                             del self._task_index[tid]
-                except json.JSONDecodeError:
-                    continue
+                except: continue
+
+    def _sync_with_filesystem(self):
+        output_dir = DATA_PIPELINE.get("output_directory", "./data/output")
+        if not os.path.exists(output_dir): return
+
+        changed = False
+        with self._lock:
+            # 1. 剔除死链
+            dead_tasks = []
+            for tid in self._ordered_keys:
+                expected_dir = os.path.join(output_dir, tid)
+                record_dir = self._task_index[tid].get("result_dir", "")
+                if not os.path.exists(expected_dir) and not os.path.exists(record_dir):
+                    dead_tasks.append(tid)
+            for tid in dead_tasks:
+                self._ordered_keys.remove(tid)
+                del self._task_index[tid]
+                changed = True
+
+            # 2. 补录遗漏
+            for item in os.listdir(output_dir):
+                item_path = os.path.join(output_dir, item)
+                if not os.path.isdir(item_path) or item in self._task_index: continue
+                
+                has_valid_file = False
+                target_file = None
+                
+                # 递归遍历找文件 (免疫特殊字符路径)
+                for root_dir, _, files in os.walk(item_path):
+                    for f in files:
+                        if f.endswith(".jsonl") or f.endswith(".md"):
+                            has_valid_file = True
+                            target_file = os.path.join(root_dir, f)
+                            break
+                    if has_valid_file: break
+                
+                if has_valid_file:
+                    try:
+                        mtime = os.path.getmtime(target_file)
+                        time_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        
+                    self._ordered_keys.append(item)
+                    self._task_index[item] = {
+                        "task_id": item,
+                        "timestamp": time_str,
+                        "query": item, 
+                        "status": "completed",
+                        "result_dir": item_path,
+                        "error": "",
+                        "queued_at": time_str
+                    }
+                    changed = True
+                    
+            if changed:
+                self._ordered_keys.sort(key=lambda k: self._task_index[k].get("timestamp", ""))
+                os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
+                with open(self.filepath, "w", encoding="utf-8") as f:
+                    for k in self._ordered_keys:
+                        f.write(json.dumps(self._task_index[k], ensure_ascii=False) + "\n")
 
     def record_task(self, task_id: str, query: str, status: str, result_dir: str = "", error: str = "", queued_at: str = None):
         with self._lock:
@@ -50,16 +109,12 @@ class TaskStore:
                 "result_dir": result_dir,
                 "error": error
             }
-            
-            # ✨ 新增：保存排队时间
-            if queued_at: 
-                record["queued_at"] = queued_at
+            if queued_at: record["queued_at"] = queued_at
                 
             if task_id not in self._task_index:
                 self._ordered_keys.append(task_id)
                 self._task_index[task_id] = record
             else:
-                # ✨ 新增：保证任务更新进度时，已有的 queued_at 不会丢失
                 if "queued_at" not in record and "queued_at" in self._task_index[task_id]:
                     record["queued_at"] = self._task_index[task_id]["queued_at"]
                 self._task_index[task_id].update(record)
@@ -91,50 +146,31 @@ class TaskStore:
                 task_dir = self._task_index[task_id].get("result_dir")
                 if task_dir and os.path.exists(task_dir):
                     import shutil
-                    try:
-                        shutil.rmtree(task_dir)
-                    except Exception:
-                        pass
+                    try: shutil.rmtree(task_dir)
+                    except: pass
                 
-                if task_id in self._ordered_keys:
-                    self._ordered_keys.remove(task_id)
+                if task_id in self._ordered_keys: self._ordered_keys.remove(task_id)
                 del self._task_index[task_id]
 
     def is_task_stopped(self, task_id: str) -> bool:
         with self._lock:
             task = self._task_index.get(task_id)
-            if not task:
-                return True
+            if not task: return True
             return task.get('status') in ('stopped', 'deleted')
 
     def get_all_tasks(self) -> list:
-        with self._lock:
-            return [self._task_index[k] for k in reversed(self._ordered_keys)]
+        with self._lock: return [self._task_index[k] for k in reversed(self._ordered_keys)]
 
 _store = None
 def _get_store() -> TaskStore:
     global _store
-    if _store is None:
-        _store = TaskStore(TASK_LOG_FILE)
+    if _store is None: _store = TaskStore(TASK_LOG_FILE)
     return _store
 
-def init_task_file():
-    _get_store()
-
-def record_task(task_id: str, query: str, status: str, result_dir: str = "", error: str = "", queued_at: str = None):
-    _get_store().record_task(task_id, query, status, result_dir, error, queued_at)
-
-def update_task_progress(task_id: str, progress: str):
-    _get_store().update_task_progress(task_id, progress)
-
-def request_stop(task_id: str):
-    _get_store().request_stop(task_id)
-
-def delete_task(task_id: str):
-    _get_store().delete_task(task_id)
-
-def is_task_stopped(task_id: str) -> bool:
-    return _get_store().is_task_stopped(task_id)
-
-def get_all_tasks() -> list:
-    return _get_store().get_all_tasks()
+def init_task_file(): _get_store()
+def record_task(task_id: str, query: str, status: str, result_dir: str = "", error: str = "", queued_at: str = None): _get_store().record_task(task_id, query, status, result_dir, error, queued_at)
+def update_task_progress(task_id: str, progress: str): _get_store().update_task_progress(task_id, progress)
+def request_stop(task_id: str): _get_store().request_stop(task_id)
+def delete_task(task_id: str): _get_store().delete_task(task_id)
+def is_task_stopped(task_id: str) -> bool: return _get_store().is_task_stopped(task_id)
+def get_all_tasks() -> list: return _get_store().get_all_tasks()
