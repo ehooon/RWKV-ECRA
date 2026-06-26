@@ -6,43 +6,13 @@ import uuid
 import concurrent.futures
 from typing import List, Dict
 from clients.llm_client import LLMClient
-from config import DATA_PIPELINE, get_llm_concurrency
+from clients.slm_client import SLMClient
+from config import DATA_PIPELINE, get_llm_concurrency, get_slm_concurrency
 from utils.checkpoint import clear_checkpoints_for_files
 from tools.registry import ToolRegistry
 from utils.chunker import get_token_count, semantic_chunk_text
-from workflows.map_reduce_flow import llm_plan_execute_check_compression
-
-def get_fs_category_tree() -> dict:
-    tree = {}
-    base_dir = os.path.join(DATA_PIPELINE["output_directory"], "分类报告体系")
-    if not os.path.exists(base_dir): return tree
-    
-    for main_cat in os.listdir(base_dir):
-        main_path = os.path.join(base_dir, main_cat)
-        if not os.path.isdir(main_path): continue
-            
-        tree[main_cat] = {}
-        for sub_cat in os.listdir(main_path):
-            sub_path = os.path.join(main_path, sub_cat)
-            if not os.path.isdir(sub_path): continue
-                
-            tree[main_cat][sub_cat] = []
-            for file_name in os.listdir(sub_path):
-                if file_name.endswith(".md") and not file_name.startswith("【类别聚合专刊】"):
-                    fname_no_ext = os.path.splitext(file_name)[0]
-                    # 静态反解：从文件名剥离出 DOC_X 烙印
-                    if "___" in fname_no_ext:
-                        name_part, fid = fname_no_ext.rsplit("___", 1)
-                    else:
-                        name_part = fname_no_ext
-                        fid = "UNKNOWN"
-                        
-                    tree[main_cat][sub_cat].append({
-                        "name": name_part,
-                        "fid": fid,
-                        "path": os.path.join(sub_path, file_name)
-                    })
-    return tree
+from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_reduce_prompt
+from workflows.map_reduce_flow import llm_plan_execute_check_compression, clean_slm_output, _sequential_assemble
 
 def parse_md_blocks(md_text: str) -> Dict[str, str]:
     blocks = {}
@@ -58,137 +28,22 @@ def parse_md_blocks(md_text: str) -> Dict[str, str]:
     if current_content: blocks[current_heading] = '\n'.join(current_content).strip()
     return blocks
 
-def _iter_cited_source_blocks(src: dict, max_tokens: int) -> list:
-    content = str(src.get("content", "")).strip()
-    if not content:
-        return []
-
-    if src.get("is_web_raw"):
-        if get_token_count(content) <= max_tokens:
-            return [{"ref_ids": [], "content": content}]
-        return [
-            {"ref_ids": [], "content": chunk}
-            for chunk in semantic_chunk_text(content, max_tokens=max_tokens, overlap_ratio=0.0)
-            if chunk.strip()
-        ]
-
-    ref_ids = list(src.get("ref_ids", []))
-    tag_str = "".join([f"^{{{fid}}}^" for fid in ref_ids])
-    header = f"【可用事实素材 {tag_str}】"
-    full_block = f"{header}\n{content}"
-    if get_token_count(full_block) <= max_tokens:
-        return [{"ref_ids": ref_ids, "content": full_block}]
-
-    body_token_budget = max(1, max_tokens - get_token_count(header) - 8)
-    return [
-        {"ref_ids": ref_ids, "content": f"{header}\n{chunk}"}
-        for chunk in semantic_chunk_text(content, max_tokens=body_token_budget, overlap_ratio=0.0)
-        if chunk.strip()
-    ]
-
-def _build_llm_small_report_chunks(static_sources: list, max_tokens: int) -> list:
-    chunks = []
-    pending_parts = []
-    pending_ref_ids = []
-    pending_tokens = 0
-
-    def flush_pending():
-        nonlocal pending_parts, pending_ref_ids, pending_tokens
-        if pending_parts:
-            chunks.append({
-                "ref_ids": list(dict.fromkeys(pending_ref_ids)),
-                "content": "\n\n".join(pending_parts)
-            })
-        pending_parts = []
-        pending_ref_ids = []
-        pending_tokens = 0
-
-    for src in static_sources:
-        for block in _iter_cited_source_blocks(src, max_tokens):
-            block_text = block["content"]
-            block_tokens = get_token_count(block_text)
-            if pending_parts and pending_tokens + block_tokens > max_tokens:
-                flush_pending()
-
-            if not pending_parts and block_tokens > max_tokens:
-                chunks.append({
-                    "ref_ids": list(dict.fromkeys(block.get("ref_ids", []))),
-                    "content": block_text
-                })
-                continue
-
-            pending_parts.append(block_text)
-            pending_ref_ids.extend(block.get("ref_ids", []))
-            pending_tokens += block_tokens
-
-    flush_pending()
-    return chunks
-
 @ToolRegistry.register(
     name="batch_process_individual_reports",
     phase="SYNTHESIS",
     signature="""[Tool] batch_process_individual_reports
-- 功能: 本地文档归档专线。专用于将缓存区中的【本地文件(DOC_X)】提炼结果生成单篇分类报告并释放内存。
+- 功能: 释放内存专用工具。目前所有文档已在提炼阶段自动资产化归档，调用此工具将直接清空无用短时缓存。
 - 参数: file_ids (目标本地文件ID数组)"""
 )
 def batch_process_individual_reports(file_paths: List[str] = None, actual_file_ids: List[str] = None, working_memory: dict = None, tracker=None, **kwargs) -> str:
     if not actual_file_ids or working_memory is None: return "参数错误。"
-    llm = LLMClient()
-    cat_tree = get_fs_category_tree()
-    output_base = DATA_PIPELINE["output_directory"]
-    results = []
-
-    for idx, fid in enumerate(actual_file_ids):
-        fname = working_memory.get(f"Path_{fid}", f"doc_{fid}.md")
-        fname_no_ext = os.path.splitext(fname)[0]
-        # 防止重复累加 ___DOC_1___DOC_1
-        if "___" in fname_no_ext:
-            fname_no_ext = fname_no_ext.split("___")[0]
-            
+    freed = 0
+    for fid in actual_file_ids:
         summary_key = f"Summary_{fid}"
-        summary = working_memory.get(summary_key, "")
-
-        already_exists = False
-        for m_cat, subs in cat_tree.items():
-            for s_cat, docs in subs.items():
-                if any(d["name"] == fname_no_ext for d in docs):
-                    results.append(f"跳过：{fname_no_ext} 已存在于 [{m_cat}/{s_cat}]。")
-                    already_exists = True
-                    break
-            if already_exists: break
-        if already_exists or not summary: continue
-
-        print(f"执行分类归档: {fname_no_ext}")
-        existing_main_cats = list(cat_tree.keys())
-        intro_text = summary[:400] + "\n...[省略]...\n" + summary[-400:] if len(summary) > 800 else summary
-
-        main_msg = [{"role": "system", "content": "选择或创建大类名称，仅输出名称本身。"}, {"role": "user", "content": f"现有: {existing_main_cats}\n前言: {intro_text}"}]
-        main_cat = re.sub(r'[^\w\u4e00-\u9fa5-]', '', llm.chat_completion(main_msg).content.strip()) or "综合领域"
-
-        existing_sub_cats = list(cat_tree.get(main_cat, {}).keys())
-        sub_msg = [{"role": "system", "content": f"为大类【{main_cat}】选择或创建小类名称，仅输出名称。"}, {"role": "user", "content": f"现有: {existing_sub_cats}\n前言: {intro_text}"}]
-        sub_cat = re.sub(r'[^\w\u4e00-\u9fa5-]', '', llm.chat_completion(sub_msg).content.strip()) or "综合应用"
-
-        report_msg = [{"role": "system", "content": f"撰写单篇概括报告。仅输出Markdown。"}, {"role": "user", "content": summary}]
-        report_content = llm.chat_completion(report_msg).content
-
-        save_dir = os.path.join(output_base, "分类报告体系", main_cat, sub_cat)
-        os.makedirs(save_dir, exist_ok=True)
-        # 静态烙印：将 fid 烧入文件名
-        save_path = os.path.join(save_dir, f"{fname_no_ext}___{fid}.md")
-        with open(save_path, "w", encoding="utf-8") as f: f.write(report_content)
-
-        if main_cat not in cat_tree: cat_tree[main_cat] = {}
-        if sub_cat not in cat_tree[main_cat]: cat_tree[main_cat][sub_cat] = []
-        cat_tree[main_cat][sub_cat].append({"name": fname_no_ext, "fid": fid, "path": save_path})
-        
         if summary_key in working_memory:
             del working_memory[summary_key]
-            
-        results.append(f"{fname_no_ext} 已归类并生成单篇报告，内存已释放。")
-
-    working_memory["__category_tree__"] = cat_tree
-    return "\n".join(results)
+            freed += 1
+    return f"本地文件资产化归档核验完毕，已成功释放 {freed} 个缓存节点内存。"
 
 @ToolRegistry.register(
     name="compress_working_memory",
@@ -210,7 +65,6 @@ def compress_working_memory(working_memory: dict = None, tracker=None, **kwargs)
                 compressed_count += 1
     return f"文本压缩执行完毕，共处理了 {compressed_count} 个数据块。"
 
-
 @ToolRegistry.register(
     name="generate_final_aggregate_reports",
     phase="SYNTHESIS",
@@ -219,37 +73,24 @@ def compress_working_memory(working_memory: dict = None, tracker=None, **kwargs)
 - 参数: 无"""
 )
 def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, agent_state=None, **kwargs) -> str:
-    cat_tree = get_fs_category_tree()
     llm = LLMClient()
-    
     print("启动汇聚分析流程 (强绑定隔离溯源模式)...")
     
     source_registry = {}
     static_sources = [] 
     
-    # [1.1] 装载本地归档 (直接从文件树读取烙印的 DOC_X)
-    if cat_tree:
-        for main_cat, subs in cat_tree.items():
-            for sub_cat, docs in subs.items():
-                for d in docs:
-                    if os.path.exists(d.get("path", "")):
-                        with open(d["path"], "r", encoding="utf-8") as f: 
-                            fid = d.get("fid", "UNKNOWN")
-                            orig_path = agent_state.id_to_path.get(fid, "") if agent_state else ""
-                            source_registry[fid] = {"title": d['name'], "url": orig_path, "type": "local"}
-                            static_sources.append({"ref_ids": [fid], "content": f.read().strip()})
-
-    # [1.2] 装载未归类的本地提炼结果
     if working_memory:
         for k, text in working_memory.items():
             if k.startswith("Summary_"):
                 fid = k.split("_", 1)[1]
+                if fid in source_registry: continue
                 fname = working_memory.get(f"Path_{fid}", f"未知文档_{fid}")
                 orig_path = agent_state.id_to_path.get(fid, "") if agent_state else ""
-                source_registry[fid] = {"title": os.path.splitext(fname)[0], "url": orig_path, "type": "local"}
-                static_sources.append({"ref_ids": [fid], "content": text.strip()})
+                cat = working_memory.get(f"Category_{fid}", {"main": "综合领域", "sub": "默认分类"})
                 
-        # [1.3] 注册网络事实 (原封不动)
+                source_registry[fid] = {"title": os.path.splitext(fname)[0], "url": orig_path, "type": "local", "main_cat": cat["main"], "sub_cat": cat["sub"]}
+                static_sources.append({"ref_ids": [fid], "content": text.strip(), "main_cat": cat["main"], "sub_cat": cat["sub"], "is_web_raw": False})
+                
         web_structured = working_memory.get("__web_structured_facts__", [])
         for item in web_structured:
             web_ref_id = item.get("ref_id")
@@ -260,190 +101,268 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             if k.startswith("WebFact_"):
                 static_sources.append({"ref_ids": [], "content": text.strip(), "is_web_raw": True})
 
-    # [1.5] 提取附录无关项
     audit_notes = []
-    # 🟢 获取用户最初的原始指令
     original_query = agent_state.user_query if agent_state and hasattr(agent_state, 'user_query') else kwargs.get("original_goal", "")
     active_goal = agent_state.refined_query if (agent_state and hasattr(agent_state, 'refined_query') and agent_state.refined_query) else kwargs.get("original_goal", "未指定目标")
     
     if agent_state and agent_state.entity_audit:
         for ent, status in agent_state.entity_audit.items():
             if "卸载" in status or "无关" in status or "放弃" in status:
-                # 🟢 核心修复：只声明那些用户在 Prompt 中点名问了，但最后证实无关的实体
                 if ent.lower() in original_query.lower() or any(kw in ent for kw in original_query.split()):
                     audit_notes.append(f"- {ent}: 经检索与查证，确认与当前分析目标无关，已在研报生成链路中剔除。")
 
     if not static_sources:
         return "未找到任何本地归档文档、未归类提炼或联网事实，无法生成报告。"
 
-    # ==========================================
-    # 2. Token 容量溢出应急处理机制 (同源隔离压缩)
-    # ==========================================
     total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
     token_limit = DATA_PIPELINE.get("llm_safe_window_tokens", 60000)
     
+    # ==========================================
+    # 2. 全局二次压缩 (复用第一次 map_reduce 流程进行二次提炼)
+    # ==========================================
     if total_tokens > token_limit:
-        print(f"\n🚨 [容量重载预警] 聚合素材池已达 {total_tokens} Tokens！远超 {token_limit} 限制。")
-        print("🔄 [底座接管] 开始执行同源隔离折叠降维策略 (防止跨文件强行关联)...")
+        print(f"\n🚨 [容量超限] 聚合素材池总字数 ({total_tokens} Tokens) 超出极限。")
+        print("🔄 正在触发全局降维 (直接复用第一次的 map_reduce_flow.py 进行二次提炼并重新绑定)...")
         
-        from clients.slm_client import SLMClient
-        from agent.orchestrator import GLOBAL_SLM_INPUT_SCHEDULER
-        from workflows.map_reduce_flow import clean_slm_output
-        from prompts.slm_prompts import build_slm_sequential_summary_prompt
-        from config import get_slm_concurrency
+        asset_paths = []
+        origin_fids = []
         
-        slm = SLMClient()
-        slm_scheduler = kwargs.get("slm_scheduler") or GLOBAL_SLM_INPUT_SCHEDULER
-        max_chunk = DATA_PIPELINE.get("max_chunk_tokens", 800)
-        concurrency = get_slm_concurrency()
-        task_id = agent_state.task_id if agent_state and getattr(agent_state, "task_id", "") else kwargs.get("task_id")
-        
-        local_sources = [s for s in static_sources if not s.get("is_web_raw")]
-        web_sources = [s for s in static_sources if s.get("is_web_raw")]
-        
-        current_local = local_sources
-        pass_num = 1
-        
-        while pass_num <= 2 and (sum(get_token_count(s["content"]) for s in current_local) + sum(get_token_count(s["content"]) for s in web_sources) > token_limit):
-            print(f"   -> 启动 SLM 高速同源压缩 (第 {pass_num} 轮)...")
-            
-            # 🟢 核心修改 1：按来源进行严格分组 (GroupBy)，绝不跨来源组装
-            grouped_sources = {}
-            for src in current_local:
-                # 使用 tuple(sorted) 确保 [DOC_1, DOC_2] 和 [DOC_2, DOC_1] 会被分到同一组
-                key = tuple(sorted(src["ref_ids"]))
-                if key not in grouped_sources:
-                    grouped_sources[key] = []
-                grouped_sources[key].append(src["content"])
-                
-            batched_blocks = []
-            for key, contents in grouped_sources.items():
-                combined_text = "\n\n".join(contents)
-                # 切割单个来源的合并长文本，严格保持该碎片只属于这个来源
-                sub_chunks = semantic_chunk_text(combined_text, max_tokens=max_chunk, overlap_ratio=0.0)
-                for sc in sub_chunks:
-                    batched_blocks.append({"ref_ids": list(key), "content": sc})
+        for src in static_sources:
+            if not src.get("is_web_raw") and src.get("ref_ids"):
+                fid = src["ref_ids"][0]
+                asset_path = working_memory.get(f"AbsPath_{fid}")
+                if asset_path and os.path.exists(asset_path):
+                    asset_paths.append(asset_path)
+                    origin_fids.append(fid)
                     
-            slm_prompts = [
-                build_slm_sequential_summary_prompt(
-                    b["content"], i+1, len(batched_blocks), "极限提取结论与事实。保持不同概念的独立性，严禁强行关联！绝对不要输出任何角标、序号或引用声明", "详尽"
-                ) for i, b in enumerate(batched_blocks)
-            ]
+        if asset_paths:
+            # 局部导入避免循环引用
+            from workflows.map_reduce_flow import delegate_to_small_models
             
-            slm_res = []
-            for i in range(0, len(slm_prompts), concurrency):
-                batch = slm_prompts[i:i+concurrency]
-                if slm_scheduler:
-                    slm_res.extend(slm_scheduler.submit(batch, tracker=tracker, task_id=task_id))
+            # 直接复用 map1 提炼流程，传入原 origin_fids 保持绑定，开启 is_temporary 防止覆盖物理资产
+            delegate_to_small_models(
+                file_paths=asset_paths,
+                actual_file_ids=origin_fids,
+                working_memory=working_memory,
+                tracker=tracker,
+                task_id=kwargs.get("task_id") or (agent_state.task_id if agent_state else None),
+                slm_scheduler=kwargs.get("slm_scheduler"),
+                agent_state=agent_state,
+                is_temporary=True
+            )
+            
+            # 重新加载压缩更新后的 content 内容，保持原始属性
+            new_static_sources = []
+            for src in static_sources:
+                if not src.get("is_web_raw") and src.get("ref_ids"):
+                    fid = src["ref_ids"][0]
+                    updated_content = working_memory.get(f"Summary_{fid}", "")
+                    new_src = src.copy()
+                    new_src["content"] = updated_content
+                    new_static_sources.append(new_src)
                 else:
-                    slm_res.extend(slm.batch_generate(batch, tracker=tracker, task_id=task_id))
-                
-            slm_cleaned = [clean_slm_output(r) for r in slm_res]
-            
-            next_local = []
-            for i, r in enumerate(slm_cleaned):
-                if r and "无实质内容" not in r and r not in ["无", "None", "none"]:
-                    next_local.append({"ref_ids": batched_blocks[i]["ref_ids"], "content": f"【提炼区块】\n{r}"})
+                    new_static_sources.append(src)
                     
-            current_local = next_local
-            pass_num += 1
-            curr_tokens = sum(get_token_count(s["content"]) for s in current_local)
-            print(f"   ✅ SLM 第 {pass_num-1} 轮压缩完毕，本地存量缩减至: {curr_tokens} Tokens。")
+            static_sources = new_static_sources
+            total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
+            print(f"   ✅ [MAP/REDUCE] 溯源重组完毕 -> 当前体积: {total_tokens} Tokens")
 
-        # LLM 终极兜底：分块写小报告，再把小报告交给后续大报告流程。
-        total_tokens = sum(get_token_count(s["content"]) for s in current_local) + sum(get_token_count(s["content"]) for s in web_sources)
+        # ---------------------------------------------------------
+        # 💥 [防爆保障] 如果二次 MAP/REDUCE 压缩后仍旧超量，则执行按大类/小类并发写小报告的逻辑
+        # ---------------------------------------------------------
         if total_tokens > token_limit:
-            print(f"   ⚠️ SLM 二压后仍超限 ({total_tokens} Tokens)，启用 LLM 分块小报告兜底...")
+            print(f"\n🚨 [极限超载] 经过二次 MAP/REDUCE 提炼后体积仍然超限 ({total_tokens} Tokens)！启动大类/小类分批打包与 LLM 局部小报告生成机制...")
+            
+            report_jobs = []
+            main_cat_groups = {}
+            web_sources = []
+            
+            for src in static_sources:
+                if src.get("is_web_raw"): web_sources.append(src)
+                else:
+                    mc = src.get("main_cat", "综合领域")
+                    if mc not in main_cat_groups: main_cat_groups[mc] = []
+                    main_cat_groups[mc].append(src)
+                    
+            for mc, sources in main_cat_groups.items():
+                mc_tokens = sum(get_token_count(s["content"]) for s in sources)
+                if mc_tokens <= token_limit:
+                    report_jobs.append({"title": f"【大类聚合】{mc}", "sources": sources})
+                else:
+                    print(f"      -> 分类 [{mc}] 依然超限，向下拆分为细分领域...")
+                    sub_cat_groups = {}
+                    for s in sources:
+                        sc = s.get("sub_cat", "综合应用")
+                        if sc not in sub_cat_groups: sub_cat_groups[sc] = []
+                        sub_cat_groups[sc].append(s)
+                        
+                    for sc, sc_sources in sub_cat_groups.items():
+                        sc_tokens = sum(get_token_count(s["content"]) for s in sc_sources)
+                        if sc_tokens <= token_limit:
+                            report_jobs.append({"title": f"【小类聚合】{mc}/{sc}", "sources": sc_sources})
+                        else:
+                            print(f"      -> 细分领域 [{mc}/{sc}] 依然超限 ({sc_tokens} Tokens)，严格按篇目进行安全打包...")
+                            job_sources = []
+                            job_tokens = 0
+                            part_idx = 1
+                            small_report_limit = token_limit // 2
+                            
+                            for src in sc_sources:
+                                src_tokens = get_token_count(src["content"])
+                                
+                                if src_tokens > small_report_limit:
+                                    print(f"         - 警告：单篇篇目庞大 ({src_tokens} Tokens)，触发文段裁切...")
+                                    chunks = semantic_chunk_text(src["content"], max_tokens=small_report_limit, overlap_ratio=0.0)
+                                    for c_idx, chunk in enumerate(chunks):
+                                        chunk_src = src.copy()
+                                        chunk_src["content"] = chunk
+                                        report_jobs.append({"title": f"【小类聚合】{mc}/{sc} (拆分文段 {c_idx+1})", "sources": [chunk_src]})
+                                else:
+                                    if job_tokens + src_tokens > small_report_limit and job_sources:
+                                        report_jobs.append({"title": f"【小类聚合】{mc}/{sc} (打包部分{part_idx})", "sources": job_sources})
+                                        part_idx += 1
+                                        job_sources = []
+                                        job_tokens = 0
+                                        
+                                    job_sources.append(src)
+                                    job_tokens += src_tokens
+                                    
+                            if job_sources:
+                                report_jobs.append({"title": f"【小类聚合】{mc}/{sc} (打包部分{part_idx})", "sources": job_sources})
+                                
+            if web_sources:
+                web_tokens = sum(get_token_count(s["content"]) for s in web_sources)
+                if web_tokens <= token_limit:
+                    report_jobs.append({"title": "【网络事实聚合】", "sources": web_sources})
+                else:
+                    job_sources = []
+                    job_tokens = 0
+                    part_idx = 1
+                    small_report_limit = token_limit // 2
+                    for src in web_sources:
+                        src_tokens = get_token_count(src["content"])
+                        if src_tokens > small_report_limit:
+                            chunks = semantic_chunk_text(src["content"], max_tokens=small_report_limit, overlap_ratio=0.0)
+                            for c_idx, chunk in enumerate(chunks):
+                                chunk_src = src.copy()
+                                chunk_src["content"] = chunk
+                                report_jobs.append({"title": f"【网络事实聚合】 (拆分文段 {c_idx+1})", "sources": [chunk_src]})
+                        else:
+                            if job_tokens + src_tokens > small_report_limit and job_sources:
+                                report_jobs.append({"title": f"【网络事实聚合】 (打包部分{part_idx})", "sources": job_sources})
+                                part_idx += 1
+                                job_sources = []
+                                job_tokens = 0
+                            job_sources.append(src)
+                            job_tokens += src_tokens
+                    if job_sources:
+                        report_jobs.append({"title": f"【网络事实聚合】 (打包部分{part_idx})", "sources": job_sources})
 
-            llm_chunk_limit = max(1, token_limit // 3)
-            report_jobs = _build_llm_small_report_chunks(current_local + web_sources, llm_chunk_limit)
             small_reports = [None] * len(report_jobs)
 
-            def generate_small_report(job_index, chunk):
+            def generate_small_report(job_index, job):
+                parts = []
+                ref_ids = []
+                for s in job["sources"]:
+                    if s.get("is_web_raw"):
+                        parts.append(s["content"])
+                    else:
+                        tag_str = "".join([f"^{{{fid}}}^" for fid in s["ref_ids"]])
+                        parts.append(f"【可用事实素材 {tag_str}】\n{s['content']}")
+                    ref_ids.extend(s.get("ref_ids", []))
+                chunk_content = "\n\n".join(parts)
+                ref_ids = list(dict.fromkeys(ref_ids))
+
                 sub_msg = [
                     {
                         "role": "system",
                         "content": (
-                            "你正在为最终大报告撰写一个分块小报告。"
-                            "只基于输入素材写结构化 Markdown 小报告，不要再按单个文件压缩。"
-                            "必须保留并照抄素材中的 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标；"
-                            "没有原文支撑的关联不要写。"
+                            f"你正在为最终大报告撰写一个【{job['title']}】分类小报告。\n"
+                            "请基于输入素材，高度提炼并聚合该分类下的核心事实，写成结构化 Markdown 小报告。\n"
+                            "绝对保留并照抄素材中的 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标！没有原文支撑的关联不要写。"
                         )
                     },
                     {
                         "role": "user",
                         "content": (
                             f"任务目标：{active_goal}\n\n"
-                            f"素材分块 {job_index + 1}/{len(report_jobs)}：\n"
-                            f"{chunk['content']}\n\n"
-                            "请输出这个分块的小报告："
+                            f"当前处理分类：{job['title']}\n"
+                            f"{chunk_content}\n\n"
+                            "请输出该分类下的高度提炼小报告："
                         )
                     }
                 ]
                 try:
                     report = llm.chat_completion(sub_msg).content.strip()
-                    if not report:
-                        return None
+                    if not report: return None
                     return {
-                        "ref_ids": list(dict.fromkeys(chunk.get("ref_ids", []))),
-                        "content": f"【分块小报告 {job_index + 1}】\n{report}"
+                        "ref_ids": ref_ids,
+                        "content": report,
+                        "main_cat": job["sources"][0].get("main_cat", ""),
+                        "sub_cat": job["sources"][0].get("sub_cat", ""),
+                        "is_web_raw": job["sources"][0].get("is_web_raw", False)
                     }
                 except Exception as e:
-                    print(f"   ❌ LLM 小报告分块 {job_index + 1} 生成失败: {e}")
+                    print(f"   ❌ LLM 小报告分块 {job['title']} 生成失败: {e}")
                     return None
 
             if report_jobs:
                 max_workers = min(len(report_jobs), get_llm_concurrency())
-                print(f"   -> LLM 终极兜底已拆分为 {len(report_jobs)} 个素材分块，启用 {max_workers} 路并发写小报告...")
+                print(f"   -> 准备完毕。正在并发生成 {len(report_jobs)} 份局部小报告 (分配线程数: {max_workers})...")
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {
-                        executor.submit(generate_small_report, idx, chunk): idx
-                        for idx, chunk in enumerate(report_jobs)
-                    }
-                    for future in concurrent.futures.as_completed(futures):
-                        idx = futures[future]
-                        result = future.result()
-                        if result:
-                            small_reports[idx] = result
+                    # 🔴 已修正: 使用 futures_dict 避免与下方的 future 循环命名冲突
+                    futures_dict = {executor.submit(generate_small_report, idx, job): idx for idx, job in enumerate(report_jobs)}
+                    for future in concurrent.futures.as_completed(futures_dict):
+                        idx = futures_dict[future]
+                        res = future.result()
+                        if res: small_reports[idx] = res
 
             static_sources = [report for report in small_reports if report]
-        else:
-            static_sources = current_local + web_sources
-            
-        total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
-        print(f"✅ 最终容量锁定: {total_tokens} Tokens。")
+            total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
+            print(f"✅ LLM 分类小报告汇聚完成！最终容量锁定在: {total_tokens} Tokens。")
+    else:
+        print(f"\n✅ 容量安全 ({total_tokens} Tokens)，直接进入最终研报生成阶段。")
 
     # ==========================================
     # 3. 构造传递给大模型的 Context
     # ==========================================
     combined_text_parts = []
-    for src in static_sources:
+    for i, src in enumerate(static_sources):
         if src.get("is_web_raw"):
-            combined_text_parts.append(src["content"])
+            combined_text_parts.append(f"📖 [情报源 {i+1} | 互联网检索]\n{src['content']}")
         else:
             tag_str = "".join([f"^{{{fid}}}^" for fid in src["ref_ids"]])
-            combined_text_parts.append(f"【可用事实素材 {tag_str}】\n{src['content']}")
+            combined_text_parts.append(f"📖 [情报源 {i+1} | 本地档案 {tag_str}]\n{src['content']}")
             
     combined_text = "\n\n".join(combined_text_parts)
-    STATIC_CONTEXT_PREFIX = f"【可用事实素材池】\n{combined_text}\n\n---\n\n"
+    STATIC_CONTEXT_PREFIX = (
+        "====================\n"
+        "【全局可用情报素材池】\n"
+        "(注：以下是按物理文件碎片化排列的底层素材。你必须跨越文件的物理边界，提取业务维度的核心逻辑，切勿将单篇素材生硬转为独立章节)\n\n"
+        f"{combined_text}\n"
+        "====================\n\n"
+    )
 
     # ==========================================
     # 4. AST 骨架生成与并发批处理渲染
     # ==========================================
     try:
         print(">> 1/3 正在生成报告骨架树(AST)...")
-        outline_sys_prompt = """任务：基于输入的目标和素材池，生成报告结构的 JSON AST 骨架。
+        outline_sys_prompt = """任务：基于输入的目标和【全局可用情报素材池】，生成一份逻辑高度凝练的报告 AST 骨架。
 
-【🚨 极端重要的防幻觉约束】
-1. 实体隔离：素材池中的文件可能相互之间【毫无关联】（例如 Tilelang 只是运算基建，RWKV 是模型，如果原文没写它们结合使用，就绝对不要将它们写在一起）。
-2. 拒绝强行归纳：如果在不同文件中发现了独立的项目，应该在大纲中为它们建立【互相平行的独立章节】，而不是强行合并或编造“协同效应”。
-3. 采用【总-分-总】结构。无确凿原文数据支撑的维度绝对不设章节。
+【🧠 核心分析与结构排版逻辑】
+1. 宏观主题聚类：你必须从杂乱无章的碎片素材中，提炼出具有逻辑穿透力的核心分析维度（例如：背景概述、核心技术、市场动态、风险挑战等）。
+2. 拒绝碎纸机式大纲：绝对不要把素材池中的“每一个单篇文章”或“每一个琐碎的子标题”直接映射为顶级章节！请合并同类项，将细碎的事实收拢到宏观维度中。
+3. 隔离但可共存：如果素材中包含多个相互独立、毫无关联的实体或项目，绝对不可强行编造它们之间的合作关系（防幻觉）。但你可以设立一个例如“各项目发展现状”的宏观章节，在章节内部进行分段论述，而不是为每个独立的实体都去新建一个顶级节点！
+4. 采用【总-分-总】结构。
+5. 【🔴 数量绝对限制】：必须高度提炼与聚合！整个大纲的节点总数必须严格控制在 3 到 7 个以内。
 
 输出 JSON 数组格式，包含 node_id 和 title 字段。示例：
 [
-  {"node_id": "01_intro", "title": "一、 全局执行摘要"},
-  {"node_id": "02_rwkv_status", "title": "二、 RWKV 模型现状独立分析"},
-  {"node_id": "03_tilelang_status", "title": "三、 Tilelang 框架独立分析"}
+  {"node_id": "01_exec_summary", "title": "一、 全局执行摘要"},
+  {"node_id": "02_tech_analysis", "title": "二、 核心技术与架构剖析"},
+  {"node_id": "03_market_status", "title": "三、 相关实体与市场现状总览"},
+  {"node_id": "04_conclusion", "title": "四、 综合研判与结论"}
 ]"""
         outline_resp = llm.chat_completion([
             {"role": "system", "content": outline_sys_prompt}, 
@@ -460,12 +379,11 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         
         print(f">> 2/3 正在并发与分批生成报告正文 (共 {len(nodes)} 个节点) ...")
         
-        # 🟢 终极防崩溃：采用 XML 标签代替 JSON 数组
         writer_sys_prompt = """任务：根据全局 AST 骨架，撰写当前被分配的【特定批次节点】的正文内容。
 
 【极为重要的溯源要求】
 你必须在阐述任何事实、结论时，严格照抄素材自带的溯源角标！
-- 本地素材头部会带有类似【可用事实素材 ^{DOC_1}^^{DOC_2}^】的标签，你在使用该段信息时句子末尾必须照抄：^{DOC_1}^^{DOC_2}^。
+- 本地素材头部会带有类似【本地档案 ^{DOC_1}^^{DOC_2}^】的标签，你在使用该段信息时句子末尾必须照抄：^{DOC_1}^^{DOC_2}^。
 - 网络素材正文自带类似 ^[WEB_REF_XXX]^ 的标签，直接照抄。
 - 绝对不要虚构角标！
 
@@ -473,10 +391,10 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 为了防止格式解析崩溃，绝对不要输出 JSON！
 请严格使用 XML 标签 <NODE id="节点ID">包裹</NODE> 来输出每个节点的正文。
 示例：
-<NODE id="01_intro">
+<NODE id="01_exec_summary">
 这里是节点正文...由于种种原因^{DOC_1}^^{DOC_2}^^[WEB_REF_456]^。
 </NODE>
-<NODE id="02_detail">
+<NODE id="02_tech_analysis">
 这里是第二个节点的正文...
 </NODE>"""
 
@@ -497,12 +415,10 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 
             raw_resp = llm.chat_completion([{"role": "system", "content": writer_sys_prompt}, {"role": "user", "content": node_prompt}]).content.strip()
             
-            # 🟢 坚如磐石的正则 XML 解析
             data_map = {}
             for match in re.finditer(r'<NODE id="([^"]+)">\s*(.*?)\s*</NODE>', raw_resp, re.DOTALL):
                 data_map[match.group(1)] = match.group(2).strip()
                 
-            # 兜底：如果模型完全忘记了写 XML 标签，且本批次只有一个节点，直接吞并全文
             if not data_map and len(batch_nodes) == 1:
                 data_map[batch_nodes[0]["node_id"]] = raw_resp
                 
@@ -526,8 +442,9 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         generated_results = {}
         max_workers = min(len(batches), get_llm_concurrency())
         
-        print(f"   -> 已拆分为 {len(batches)} 个批次，分配至 {max_workers} 个线程进行并发生成...")
+        print(f"   -> 已将大纲拆分为 {len(batches)} 个批次，正在由 {max_workers} 个线程同时撰写正文...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 🔴 已修正: 使用 future_to_batch 以确保和下方逻辑变量名匹配
             future_to_batch = {executor.submit(generate_node_batch, b): b for b in batches}
             for future in concurrent.futures.as_completed(future_to_batch):
                 batch_ref = future_to_batch[future]
@@ -562,7 +479,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             def map_and_replace_citation(match, is_web):
                 ref_id = match.group(1)
                 if ref_id not in source_registry:
-                    # 🟢 不再吞噬！如果有幻觉角标，原样保留在文本中，防止误伤正常文本
                     return match.group(0) 
                     
                 src_meta = source_registry[ref_id]
@@ -598,7 +514,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                 lambda m: map_and_replace_citation(m, True), 
                 beautified_content
             )
-            # 🟢 兼容 DOC_X 和 UNKNOWN_X 两种前缀
             beautified_mapped = re.sub(
                 r'\^?[\{\[]?((?:DOC|UNKNOWN)_[\w\-]+)[\}\]]?\^?', 
                 lambda m: map_and_replace_citation(m, False), 

@@ -23,10 +23,13 @@ class Planner:
 
 [执行约束]
 1. 执行 execute_web_search 时，提取缺口中的核心实体，剥离无关上下文。
-2. 执行 delegate_to_small_models 时，必须从环境状态中提取出准确的 file_ids（如 ["DOC_1"]）。
+2. 调用文档工具（如 preview_document_content、delegate_to_small_models 等）时，可以通过传入 ["ALL"] 快速处理所有尚未处理的剩余文件。
 
 [示例]
-缺口: "需要提炼未读文件: DOC_1, DOC_2"
+缺口: "需要提炼所有剩余的未读文件"
+-> {{"action": "delegate_to_small_models", "args": {{"file_ids": ["ALL"]}}}}
+
+缺口: "需要提炼文件: DOC_1, DOC_2"
 -> {{"action": "delegate_to_small_models", "args": {{"file_ids": ["DOC_1", "DOC_2"]}}}}
 
 缺口: "调查 Hongkong Doll 是否对 ETH 产生影响"

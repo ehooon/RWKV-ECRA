@@ -1,3 +1,4 @@
+# RWKV-ECRA/main.py
 import os
 import sys
 from agent.orchestrator import Orchestrator
@@ -7,6 +8,7 @@ def setup_env():
     os.environ['BAIDU_API_KEY'] = API_KEYS.get("baidu", "")
     os.makedirs(DATA_PIPELINE["input_directory"], exist_ok=True)
     os.makedirs(DATA_PIPELINE["output_directory"], exist_ok=True)
+    os.makedirs(DATA_PIPELINE.get("asset_directory", "./data/knowledge_assets"), exist_ok=True)
 
 if __name__ == "__main__":
     setup_env()

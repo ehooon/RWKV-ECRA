@@ -59,7 +59,8 @@ def cleanup_environment():
     dirs_to_clean = [
         config.DATA_PIPELINE["input_directory"],
         config.DATA_PIPELINE["checkpoint_directory"],
-        config.DATA_PIPELINE.get("debug_directory", "./data/debug_slm")
+        config.DATA_PIPELINE.get("debug_directory", "./data/debug_slm"),
+        config.DATA_PIPELINE.get("asset_directory", "./data/knowledge_assets")
     ]
     for directory in dirs_to_clean:
         if os.path.exists(directory):

@@ -8,7 +8,7 @@ from config import API_KEYS, SEARCH_CONFIG, DATA_PIPELINE, get_llm_provider, get
 from tools.registry import ToolRegistry
 from clients.slm_client import SLMClient
 from clients.llm_client import LLMClient
-from prompts.slm_prompts import build_slm_web_search_compress_prompt
+from prompts.slm_prompts import build_slm_web_search_compress_prompt, build_slm_reduce_prompt
 from utils.chunker import get_token_count, semantic_chunk_text
 
 slm_client = SLMClient()
@@ -60,7 +60,6 @@ def _filter_raw_web_results_by_query(results: list, query: str) -> tuple:
     return kept_results, dropped_results
 
 def _assemble_web_search_facts(all_responses: list, prompt_metadata: list) -> tuple:
-    """组装 SLM 提炼结果；这里只过滤空输出，不做相关性审查。"""
     sources = {}
 
     for idx, out in enumerate(all_responses):
@@ -102,7 +101,6 @@ def _assemble_web_search_facts(all_responses: list, prompt_metadata: list) -> tu
     return clean_parts, structured_web_facts, processed_refs
 
 def _generate_search_queries(query: str, active_goal: str) -> list:
-    """让 AI 动态生成多维度搜索提示词"""
     llm = LLMClient()
     sys_prompt = "你是一个高级情报检索专家。请基于【核心实体】和【全局调查目标】，生成 3 个不同维度的搜索引擎查询短语（越精简越好，适合喂给谷歌/百度）。\n维度要求：1. 定义与背景； 2. 与调查目标的深度关联； 3. 最新新闻与动态。\n必须只输出 JSON 字符串数组格式，例如 [\"词1\", \"词2\", \"词3\"]。"
     
@@ -118,7 +116,6 @@ def _generate_search_queries(query: str, active_goal: str) -> list:
                 return [str(q)[:30] for q in q_list[:3]]
     except Exception:
         pass
-    # 兜底搜索词
     return [f"{query} 是什么", f"{query} {active_goal[:8]} 关联", f"{query} 最新动态"]
 
 @ToolRegistry.register(
@@ -132,15 +129,11 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
     provider = get_llm_provider()
     safe_query = re.sub(r'\W+', '_', query)[:20]
     
-    # 动态获取当前正在执行的全局目标
     active_goal = agent_state.refined_query if (agent_state and hasattr(agent_state, 'refined_query') and agent_state.refined_query) else kwargs.get("original_goal", "当前主线任务")
 
     if working_memory is not None and "__web_structured_facts__" not in working_memory:
         working_memory["__web_structured_facts__"] = []
 
-    # ==========================================
-    # 🌟 路线 A：百度文心原生联网架构
-    # ==========================================
     if provider == "baidu":
         print(f"[Web Search]: 🚀 启动文心原生关联检索 -> 实体: '{query}' ...")
         llm = LLMClient()
@@ -181,24 +174,31 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
         except Exception as e:
             return f"[系统异常] 联网检索报错: {str(e)}"
             
-    # ==========================================
-    # 🚀 路线 B：Tavily AI搜索词扩展 + SLM 全文校验去噪
-    # ==========================================
     try:
         from tavily import TavilyClient
         client = TavilyClient(api_key=API_KEYS.get("tavily", ""))
         
-        # 1. 动态生成 3 个维度的查询词
         queries_to_run = _generate_search_queries(query, active_goal)
         print(f"[Web Search]: 🧠 AI 动态扩展多维检索词: {queries_to_run}")
         
+        # 🟢 修复1：完全读取 SEARCH_CONFIG
+        s_depth = SEARCH_CONFIG.get("search_depth", "basic")
+        s_max_res = SEARCH_CONFIG.get("max_results", 4)
+        s_time_range = SEARCH_CONFIG.get("time_range", "month")
+
         def run_tavily_search(q: str, topic: str):
             try:
-                return client.search(query=q, search_depth="basic", max_results=4, include_raw_content=False, time_range="month", search_topic=topic).get("results", [])
+                return client.search(
+                    query=q, 
+                    search_depth=s_depth, 
+                    max_results=s_max_res, 
+                    include_raw_content=False, 
+                    time_range=s_time_range, 
+                    search_topic=topic
+                ).get("results", [])
             except: return []
 
-        # 2. 高并发多维度、多分类抓取 (极大扩充参考网页数量)
-        print(f"[Web Search]: 🚀 正在向 Tavily 并发发射检索探针...")
+        print(f"[Web Search]: 🚀 正在向 Tavily 并发发射检索探针 (深度:{s_depth}, 最大结果:{s_max_res})...")
         all_raw_results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
             futures = []
@@ -224,17 +224,17 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
         if not unique_results:
             return f"[系统状态] 搜索实体 '{query}' 的结果均未通过原始网页关键词检查。"
         
-        # 3. 构建 SLM 校验队列
         prompts = []
         prompt_metadata = []
+        # 🟢 修复2：读取 DATA_PIPELINE.get("max_chunk_tokens") 和 overlap_ratio
         max_chunk = DATA_PIPELINE.get("max_chunk_tokens", 800)
+        overlap_ratio = DATA_PIPELINE.get("overlap_ratio", 0.05)
         
         for r in unique_results:
             title = r.get("title", "未命名网页").strip()
             web_ref_id = f"WEB_REF_TV_{uuid.uuid4().hex[:6]}"
-            chunks = semantic_chunk_text(r.get("content", "").strip(), max_tokens=max_chunk, overlap_ratio=0.1)
+            chunks = semantic_chunk_text(r.get("content", "").strip(), max_tokens=max_chunk, overlap_ratio=overlap_ratio)
             for chunk in chunks:
-                # 传入 active_goal 进行目标锚定
                 prompts.append(build_slm_web_search_compress_prompt(query, f"【标题】: {title}\n【片段】: {chunk}", active_goal))
                 prompt_metadata.append({"ref_id": web_ref_id, "title": title, "url": r.get("url", "")})
             
@@ -250,8 +250,48 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
             else:
                 all_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
             
-        # 4. 组装提炼结果。相关性只在原始网页结果上做静态关键词检查，不使用 SLM 输出做审查。
-        clean_parts, structured_web_facts, processed_refs = _assemble_web_search_facts(all_responses, prompt_metadata)
+        reduce_tasks = []
+        reduce_metadata = []
+        sources_map = {}
+        for idx, out in enumerate(all_responses):
+            if idx >= len(prompt_metadata): break
+            clean_out = _clean_slm_web_output(out)
+            if _is_empty_web_fact(clean_out): continue
+            meta = prompt_metadata[idx]
+            ref_id = meta["ref_id"]
+            if ref_id not in sources_map:
+                sources_map[ref_id] = {"title": meta["title"], "url": meta["url"], "facts": []}
+            sources_map[ref_id]["facts"].append(clean_out)
+
+        reduce_group_size = DATA_PIPELINE.get("reduce_group_size", 4)
+        # 🟢 修复3：严格读取并传入 config 的 reduce_rule，而不是用 active_goal 代替
+        actual_reduce = DATA_PIPELINE.get("reduce_rule", "保持原意压缩，去重并合并同类逻辑，绝对保留事实性数据和原始结论")
+        
+        for ref_id, source in sources_map.items():
+            facts = source["facts"]
+            if not facts: continue
+            for i in range(0, len(facts), reduce_group_size):
+                batch_facts = facts[i:i+reduce_group_size]
+                b_text = "\n\n".join([f"片段{j+1}:\n{b}" for j, b in enumerate(batch_facts)])
+                prompt = build_slm_reduce_prompt(b_text, actual_reduce, 1, 1, False)
+                reduce_tasks.append(prompt)
+                reduce_metadata.append({
+                    "ref_id": ref_id,
+                    "title": source["title"],
+                    "url": source["url"]
+                })
+
+        all_reduce_responses = []
+        if reduce_tasks:
+            print(f"[Web Search]: 🛡️ 启动 SLM REDUCE 合并去重 (共 {len(reduce_tasks)} 个分块)...")
+            for i in range(0, len(reduce_tasks), concurrency_limit):
+                prompt_batch = reduce_tasks[i:i+concurrency_limit]
+                if slm_scheduler:
+                    all_reduce_responses.extend(slm_scheduler.submit(prompt_batch, tracker=tracker, task_id=task_id))
+                else:
+                    all_reduce_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
+
+        clean_parts, structured_web_facts, processed_refs = _assemble_web_search_facts(all_reduce_responses, reduce_metadata)
 
         status_str = "确认相关 (已完成提炼)"
             

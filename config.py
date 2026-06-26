@@ -19,9 +19,12 @@ SEARCH_CONFIG = _cfg.get("SEARCH_CONFIG", {})
 
 DATA_PIPELINE = _cfg.get("DATA_PIPELINE", {})
 # 将 json 中的相对路径 "./" 转换为基于当前项目路径的绝对路径
-for key in ["input_directory", "output_directory", "checkpoint_directory", "debug_directory"]:
-    if key in DATA_PIPELINE and DATA_PIPELINE[key].startswith("./"):
+for key in ["input_directory", "output_directory", "checkpoint_directory", "debug_directory", "asset_directory"]:
+    if key in DATA_PIPELINE and isinstance(DATA_PIPELINE[key], str) and DATA_PIPELINE[key].startswith("./"):
         DATA_PIPELINE[key] = os.path.join(BASE_DIR, DATA_PIPELINE[key][2:])
+
+if "asset_directory" not in DATA_PIPELINE:
+    DATA_PIPELINE["asset_directory"] = os.path.join(BASE_DIR, "data", "knowledge_assets")
 
 AGENT_CONFIG = _cfg.get("AGENT_CONFIG", {})
 LLM_CONFIG = _cfg.get("LLM_CONFIG", {})

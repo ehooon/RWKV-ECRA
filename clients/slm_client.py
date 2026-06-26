@@ -3,6 +3,7 @@ import json
 import requests
 import time
 from config import get_slm_endpoint, get_slm_password
+from utils.chunker import get_token_count
 
 class SLMClient:
     def __init__(self, endpoint_override=None, password_override=None):
@@ -38,19 +39,29 @@ class SLMClient:
             "temperature": 1.0,       
             "top_k": 20,
             "top_p": 0.95,
-            "alpha_presence": 1.0,    
+            "alpha_presence": 2.0,    
             "alpha_frequency": 0.0,   
             "alpha_decay": 0.99,
             "stream": True,
             "password": self.password
         }
+
+        # 1. 动态超时计算
+        # 基础通信保障时间
+        BASE_TIMEOUT_SECONDS = 60.0  
+        # 每1000个Token额外增加的等待预留时间（覆盖缓慢的 prefill 阶段）
+        PER_1K_TOKENS_TIMEOUT_SECONDS = 45.0 
+        
+        total_tokens = sum(get_token_count(c) for c in contents)
+        dynamic_timeout = BASE_TIMEOUT_SECONDS + (total_tokens / 1000.0) * PER_1K_TOKENS_TIMEOUT_SECONDS
         
         results = {i: "" for i in range(len(contents))}
         max_retries = 3
         
         for attempt in range(max_retries):
             try:
-                response = requests.post(self.endpoint, json=payload, headers=self.headers, stream=True, timeout=120)
+                print(f"🚀 [SLM Client] 发射批次 (大小: {len(contents)}, 总计: {total_tokens} Tokens)。动态超时设置为 {dynamic_timeout:.1f} 秒。")
+                response = requests.post(self.endpoint, json=payload, headers=self.headers, stream=True, timeout=dynamic_timeout)
                 if response.status_code != 200:
                     raise RuntimeError(f"HTTP {response.status_code} - {response.content.decode('utf-8', errors='ignore')}")
 
@@ -89,8 +100,9 @@ class SLMClient:
                     except Exception as e:
                         raise e 
 
-                if not received_valid_chunk:
+                if not received_valid_chunk and len(contents) > 0:
                     if attempt < max_retries - 1:
+                        print("⚠️ [SLM Client] 批次处理未返回任何有效数据块，可能是空内容或连接问题，将触发重试。")
                         time.sleep(2)
                         continue
 
@@ -98,9 +110,11 @@ class SLMClient:
                 return final_responses
                 
             except requests.exceptions.RequestException as e:
+                # 2. 优化重试日志，指示具体重试次数
+                print(f"⚠️ [SLM Client] 批次 (大小: {len(contents)}) 传输超时或网络异常，触发重试 ({attempt + 1}/{max_retries})... 异常: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
                     continue
-                raise RuntimeError(f"网络异常: {str(e)}")
+                raise RuntimeError(f"网络异常，重试 {max_retries} 次后彻底失败: {str(e)}")
             except RuntimeError as e:
                 raise e

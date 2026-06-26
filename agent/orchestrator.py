@@ -17,7 +17,7 @@ from config import TRACKING, DATA_PIPELINE, get_slm_async_batch_wait_ms, get_slm
 from tools.registry import ToolRegistry
 from utils.chunker import get_token_count
 from utils.task_manager import is_task_stopped, update_task_progress
-
+from workflows.report_flow import generate_final_aggregate_reports
 import tools.static_ops 
 import tools.web_search
 import workflows.map_reduce_flow
@@ -178,7 +178,6 @@ class AgentState:
             f"- 当前执行目标: {active_query}"
         ]
         
-        # 🟢 新增：把当前的实体状态挂载到环境变量中，防止大模型失忆重置
         if self.entity_audit:
             env_lines.append("- 🎯 当前实体校验状态 (Entity Audit):")
             for ent, status in self.entity_audit.items():
@@ -191,7 +190,7 @@ class AgentState:
         for k, v in self.working_memory.items():
             if any(fid in k for fid in self.abandoned_file_ids):
                 continue
-            if not k.startswith("__") and not k.startswith("AbsPath_") and not k.startswith("Path_"):
+            if not k.startswith("__") and not k.startswith("AbsPath_") and not k.startswith("Path_") and not k.startswith("Category_"):
                 filtered_mem[k] = v
 
         if not filtered_mem:
@@ -205,16 +204,15 @@ class AgentState:
             memory_details.append(f"- `{k}`: [{desc}]")
                 
         lines = ["【挂载模块: 情报目录大纲】"]
-        
         lines.append(f"[系统状态] 当前可用知识库缓存已挂载（体积估算: {memory_total_tokens} Tokens）。")
         lines.append("【工作指引】: 请继续检查并收集其他缺漏情报；如果所有核心事实均已齐备，请立即调用 generate_final_aggregate_reports 进入最终聚合。")
-            
         lines.append("\n以下是已获取的可用情报，请据此决定下一步：")
         lines.extend(memory_details)
         return "\n".join(lines)
 
     def _mount_local_workspace(self) -> str:
-        pending_items = []
+        pending_preview = []
+        pending_extract = []
         for fid, path in self.id_to_path.items():
             if fid in self.abandoned_file_ids:
                 continue 
@@ -222,22 +220,27 @@ class AgentState:
                 continue 
             
             if f"Preview_{fid}" in self.memory_catalog:
-                pending_items.append(f"- {fid}: {os.path.basename(path)} [已试读判定为相关，等待进行全文深度提炼]")
+                pending_extract.append(f"- {fid}: {os.path.basename(path)} [已试读判定为相关，等待进行全文深度提炼]")
             else:
-                pending_items.append(f"- {fid}: {os.path.basename(path)} [未读，可试读排查或直接提取]")
-            
+                pending_preview.append(f"- {fid}: {os.path.basename(path)} [未读，可试读或直接全文提取]")
+                
+        pending_items = pending_preview + pending_extract
         if not pending_items:
             return ""
             
         lines = [
             "【挂载模块: 本地工作区文件 (Local Workspace)】", 
-            "核心防幻觉红线：本地工作区中的文件可能是【完全相互独立、毫无关联】的实体（例如 A项目 与 B项目）。",
-            "你必须客观独立地提取它们的信息。绝不要因为它们同在一个目录下，就在没有原文依据的情况下，强行脑补或捏造它们之间存在合作、使用或因果关系！",
-            f"发现 {len(pending_items)} 个尚未完全消化的本地文件资源："
+            "核心防幻觉红线：本地工作区中的文件可能是【完全独立、毫无关联】的，不要在无原文依据时捏造它们的合作关系！"
         ]
+        
+        # 静态代码状态检查注入
+        lines.append(f"📊 静态代码审计提醒：总共 {len(self.id_to_path)} 份文件中，仍有 {len(pending_items)} 份未被处理（系统防漏缺扫描）！")
+        lines.append("💡 快捷通配符：如果缺口是需要处理大量未读文件，在调用工具的 file_ids 时可直接传入 [\"ALL\"]，底层引擎会自动将所有剩余未处理文件安全映射展开！")
+        
+        lines.append(f"\n剩余清单 (展示前15项)：")
         lines.extend(pending_items[:15])
         if len(pending_items) > 15:
-            lines.append("... (隐藏剩余文件，使用 search_local_file 检索)")
+            lines.append(f"... (已隐藏剩余 {len(pending_items)-15} 个文件)")
             
         return "\n".join(lines)
 
@@ -341,17 +344,26 @@ class Orchestrator:
                 
                 if "refined_query" in analysis and analysis["refined_query"]:
                     self.state.refined_query = analysis["refined_query"]
+                    
                 if "entity_audit" in analysis:
                     self.state.entity_audit.update(analysis["entity_audit"])
                     
-                abandoned = analysis.get("abandoned_file_ids", [])
-                if isinstance(abandoned, list) and abandoned:
+                abandoned = analysis.get("abandoned_file_ids", {})
+                abandoned_reasons = {}
+                # 向下兼容大模型错误输出为数组的情况
+                if isinstance(abandoned, list):
                     self.state.abandoned_file_ids.update(abandoned)
+                    abandoned_reasons = {fid: "未提供屏蔽原因" for fid in abandoned}
+                elif isinstance(abandoned, dict):
+                    self.state.abandoned_file_ids.update(abandoned.keys())
+                    abandoned_reasons = abandoned
                 
                 print(f"\n" + "="*50)
                 print(f"🕵️ [Deep Research 步数 {step_count}]")
-                if self.state.abandoned_file_ids:
-                    print(f"🗑️ 物理屏蔽资源: {list(self.state.abandoned_file_ids)}")
+                if abandoned_reasons:
+                    print("🗑️ 本轮新增物理屏蔽拦截:")
+                    for f_id, reason in abandoned_reasons.items():
+                        print(f"   - {f_id}: {reason}")
                 print(f"🔍 实体审计 (Entity Audit):")
                 for ent, desc in analysis.get('entity_audit', {}).items():
                     print(f"  - {ent}: {desc}")
@@ -362,6 +374,64 @@ class Orchestrator:
                 
                 plan = self.planner.plan_next_action(user_query, analysis, context_text, phase)
                 action, args = plan["action"], plan["args"]
+
+                # ======== 🔴 全局收网对比审计逻辑 ========
+                intent = analysis.get("intent_mode", "BROAD_ANALYSIS")
+                
+                # 拦截大模型过早结束：比对资产库目标，强制将遗漏文件送去提取
+                if intent == "BROAD_ANALYSIS" and action in ["generate_final_aggregate_reports", "finish_task", "batch_process_individual_reports"]:
+                    missing_extract = []
+                    for fid in self.state.id_to_path.keys():
+                        if fid not in self.state.abandoned_file_ids:
+                            if f"Summary_{fid}" not in self.state.memory_catalog:
+                                missing_extract.append(fid)
+                    
+                    if missing_extract:
+                        print(f"🛑 [全局收网审计] 大模型试图提早结束，但系统资产库比对发现仍有 {len(missing_extract)} 篇文档未提取！已强制扭转路由至 delegate_to_small_models。")
+                        action = "delegate_to_small_models"
+                        args = {"file_ids": missing_extract}
+                        phase = "EXTRACTION"
+
+                # ======== 🔴 ALL 通配符解析 & 静态兜底逻辑 ========
+                if "file_ids" in args:
+                    original_fids = args.get("file_ids", [])
+                    if isinstance(original_fids, str): original_fids = [original_fids]
+                    if not isinstance(original_fids, list): original_fids = []
+                    
+                    has_all_macro = any(str(f).upper() == "ALL" for f in original_fids)
+                    
+                    # 触发条件：大模型主动传入 ["ALL"]，或者泛读模式防幻觉兜底
+                    if has_all_macro or (intent == "BROAD_ANALYSIS" and action in ["preview_document_content", "delegate_to_small_models"]):
+                        all_pending = []
+                        for fid, path in self.state.id_to_path.items():
+                            if fid in self.state.abandoned_file_ids: continue
+                            has_preview = f"Preview_{fid}" in self.state.memory_catalog
+                            has_summary = f"Summary_{fid}" in self.state.memory_catalog
+                            
+                            if action == "preview_document_content":
+                                if not has_preview and not has_summary:
+                                    all_pending.append(fid)
+                            elif action == "delegate_to_small_models":
+                                if not has_summary:
+                                    all_pending.append(fid)
+                            elif has_all_macro:
+                                all_pending.append(fid)
+                                
+                        if all_pending:
+                            for f in all_pending:
+                                if f not in original_fids:
+                                    original_fids.append(f)
+                            
+                            if has_all_macro:
+                                print(f"🌟 [指令解析] 拦截到 'ALL' 通配符，已将其映射为 {len(all_pending)} 个待处理文件！")
+                            else:
+                                print(f"🔧 [静态代码兜底] 检测到存在漏读文件，强制将剩余 {len(all_pending)} 个文件绑定至 {action}！")
+
+                        # 剔除数组中的 "ALL" 字样
+                        original_fids = [f for f in original_fids if str(f).upper() != "ALL"]
+                        args["file_ids"] = original_fids
+                # ====================================================
+
                 print(f"[工具调用]: -> {action}()")
 
                 friendly_phase = PHASE_MAP.get(phase, phase)
@@ -395,8 +465,13 @@ class Orchestrator:
                 }
                 
                 if "file_ids" in args:
-                    args["actual_file_ids"] = args["file_ids"]
-                    args["file_paths"] = [self.state.id_to_path.get(fid) for fid in args["file_ids"] if fid in self.state.id_to_path]
+                    valid_fids = []
+                    for fid in args.get("file_ids", []):
+                        if fid not in valid_fids and fid in self.state.id_to_path:
+                            valid_fids.append(fid)
+                    args["file_ids"] = valid_fids
+                    args["actual_file_ids"] = valid_fids
+                    args["file_paths"] = [self.state.id_to_path[fid] for fid in valid_fids]
 
                 result = ToolRegistry.execute(action, args=args, context=env_context)
                 self.state.last_feedback = f"上一步 [{action}] 执行结果:\n{result}"
@@ -410,7 +485,7 @@ class Orchestrator:
                     if "排版研报" not in str(self.state.final_result) and not is_task_stopped(self.state.task_id):
                         print("\n[系统兜底] 检测到任务结束，强制调起聚合引擎...")
                         push_progress("🔧 检测到任务闭环，正在生成最终聚合研报...")
-                        from workflows.report_flow import generate_final_aggregate_reports
+                        
                         generate_final_aggregate_reports(working_memory=self.state.working_memory, tracker=self.tracker, agent_state=self.state)
                     
                     break
@@ -426,7 +501,6 @@ class Orchestrator:
         if not self.state.is_finished and not is_task_stopped(self.state.task_id):
             print("\n[系统兜底] 达到最大探索步数，强制调起聚合引擎...")
             push_progress("⚠️ 达到最大思考步数限制，正在强制生成最终聚合研报...")
-            from workflows.report_flow import generate_final_aggregate_reports
             generate_final_aggregate_reports(working_memory=self.state.working_memory, tracker=self.tracker, agent_state=self.state)
             
         return self.state.final_result

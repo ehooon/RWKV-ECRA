@@ -49,31 +49,71 @@ def search_local_file(keyword: str = "", path_to_id: dict = None, **kwargs) -> s
 def preview_document_content(file_paths: list = None, actual_file_ids: list = None, agent_state=None, tracker=None, working_memory: dict = None, **kwargs) -> str:
     if not file_paths or not actual_file_ids: return "未传入目标文件路径或ID。"
     
+    from utils.chunker import _smart_truncate
+    from utils.asset_manager import get_asset
+
     res = []
     prompts = []
     valid_files = []
-    
+    cached_assets = {} 
+
     for idx, path in enumerate(file_paths):
+        fid = actual_file_ids[idx]
+        fname = os.path.basename(path)
         try:
+            # 检查永久资产库，拦截试读
+            asset = get_asset(path)
+            if asset and os.path.exists(asset["asset_path"]):
+                with open(asset["asset_path"], "r", encoding="utf-8") as f:
+                    asset_content = f.read()
+                cached_assets[fid] = {
+                    "fname": fname,
+                    "main_cat": asset["main_cat"],
+                    "sub_cat": asset["sub_cat"],
+                    "asset_path": asset["asset_path"],
+                    "content": asset_content
+                }
+                print(f"⚡ [试读拦截] {fname} 命中永久知识库，瞬间直通加载，免试读算力消耗。")
+                res.append(f"[{fname}] 命中本地资产库，免试读且已直通提取。")
+                continue
+
             text = read_local_file(path)
-            total_len = len(text)
+            if not text.strip():
+                raise ValueError("文件无实质内容或为空")
+
+            # 采用 2400 Token 精确前缀截断，屏蔽结尾附录噪音
+            preview_text, _ = _smart_truncate(text, max_tokens=2400)
             
-            if total_len <= 1500:
-                preview_text = text
-            else:
-                head = text[:500]
-                tail = text[-500:]
-                mid_start = random.randint(500, total_len - 500)
-                mid = text[mid_start:mid_start+500]
-                preview_text = f"{head}\n\n...[中段随机抽样]...\n\n{mid}\n\n...[尾部抽样]...\n\n{tail}"
+            if len(preview_text) < len(text):
+                preview_text += "\n\n...[后续内容较长，截取前2400 Token进行概览评估]..."
                 
             prompts.append(build_slm_preview_prompt(preview_text))
-            valid_files.append((actual_file_ids[idx], os.path.basename(path)))
+            valid_files.append((fid, fname))
         except Exception as e:
-            res.append(f"文件 {os.path.basename(path)} 读取失败: {str(e)}")
-            
+            print(f"⚠️ [试读拦截] {fname} 无法阅读 (原因: {str(e)})，已自动剔除出并发队列。")
+            res.append(f"文件 {fname} 读取失败: {str(e)}")
+            if working_memory is not None:
+                working_memory[f"Preview_{fid}"] = f"读取失败: {str(e)}"
+                if agent_state:
+                    agent_state.memory_catalog[f"Preview_{fid}"] = f"读取失败: {str(e)}"
+                    
+    # ======== 写入缓存与早退逻辑 ========
+    def _apply_caches_and_return():
+        if working_memory is not None:
+            from utils.chunker import get_token_count
+            for c_fid, asset_info in cached_assets.items():
+                working_memory[f"Category_{c_fid}"] = {"main": asset_info["main_cat"], "sub": asset_info["sub_cat"]}
+                # 💥 核心修复：命中资产直接赋予 Summary 级别，不走 Preview，防止大模型误判抛弃！
+                working_memory[f"Summary_{c_fid}"] = asset_info["content"]
+                working_memory[f"Path_{c_fid}"] = asset_info["fname"]
+                working_memory[f"AbsPath_{c_fid}"] = asset_info["asset_path"]
+                if agent_state:
+                    tok_count = get_token_count(asset_info["content"])
+                    agent_state.memory_catalog[f"Summary_{c_fid}"] = f"状态: 已加载复用资产库直通提取 [{asset_info['main_cat']}/{asset_info['sub_cat']}] (~{tok_count} Tokens)"
+        return "状态返回: 试读与资产对齐结束。请查阅缓存区决定下一步。\n" + "\n".join(res)
+
     if not prompts:
-        return "\n".join(res)
+        return _apply_caches_and_return()
         
     print(f"[试读斥候]: 正在委派 SLM 全面抽样试读 {len(prompts)} 个未知文件...")
     
@@ -84,10 +124,11 @@ def preview_document_content(file_paths: list = None, actual_file_ids: list = No
     else:
         slm_responses = slm_client.batch_generate(prompts, tracker=tracker, task_id=task_id)
     
+    files_to_categorize = []
+    
     for i, out in enumerate(slm_responses):
         fid, fname = valid_files[i]
         clean_out = out.split("</think>")[-1].strip() if "</think>" in out else out.strip()
-        
         catalog_desc = clean_out.replace('\n', ' | ') 
         
         if agent_state:
@@ -96,8 +137,95 @@ def preview_document_content(file_paths: list = None, actual_file_ids: list = No
             working_memory[f"Preview_{fid}"] = catalog_desc
             
         res.append(f"[{fname}] 试读完成，情报已登记。")
+        files_to_categorize.append((fid, fname, clean_out))
         
-    return "状态返回: 试读任务结束。请查阅环境上下文中的【运行缓存区】目录大纲，以评估文件关联度。"
+    # ======== 🔴 核心逻辑 2：大模型批量对齐归类与全局合并 ========
+    print(f"[试读斥候]: 正在调用 LLM 为 {len(files_to_categorize)} 个文件按批次提取本地资产分类...")
+    from utils.asset_manager import get_all_categories
+    from clients.llm_client import LLMClient
+    from config import get_llm_concurrency
+    import concurrent.futures
+    import re
+    
+    existing_tree = get_all_categories()
+    sub_cats_str = json.dumps(existing_tree, ensure_ascii=False)
+    llm = LLMClient()
+    
+    def _batch_categorize(batch_data):
+        sys_msg = """你是一个专业的知识库资产管理员。请仔细阅读以下多篇文章的概览，严格按照【知识领域】（例如：人工智能、生物医药、金融经济、材料科学等）对它们进行大类(main)和小类(sub)划分。
+【红线约束】：
+1. 严禁使用“学术论文”、“科研成果”、“技术文献”、“研究报告”等【文件体裁】作为大类！必须提炼其背后的【核心学科或业务领域】。
+2. 尽量复用已有的分类体系，保持分类收敛。
+
+请仅输出合法的 JSON，格式为：
+{
+  "fid_1": {"main": "大类名", "sub": "小类名"},
+  "fid_2": {"main": "大类名", "sub": "小类名"}
+}"""
+        user_msg = f"现有分类树: {sub_cats_str}\n\n"
+        for c_fid, c_fname, preview_text in batch_data:
+            user_msg += f"--- 文件ID: {c_fid} | 文件名: {c_fname} ---\n{preview_text}\n\n"
+            
+        try:
+            resp = llm.chat_completion([{"role": "system", "content": sys_msg}, {"role": "user", "content": user_msg}]).content
+            match = re.search(r'\{.*\}', resp, re.DOTALL)
+            return json.loads(match.group(0))
+        except Exception:
+            return {b[0]: {"main": "综合领域", "sub": "默认分类"} for b in batch_data}
+
+    # 4 篇为一组合并预测
+    batch_size = 4
+    batches = [files_to_categorize[i:i+batch_size] for i in range(0, len(files_to_categorize), batch_size)]
+    
+    preliminary_categories = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=get_llm_concurrency()) as executor:
+        futures = [executor.submit(_batch_categorize, b) for b in batches]
+        for future in concurrent.futures.as_completed(futures):
+            res_json = future.result()
+            if isinstance(res_json, dict):
+                preliminary_categories.update(res_json)
+                
+    # 兜底防丢
+    for c_fid, _, _ in files_to_categorize:
+        if c_fid not in preliminary_categories:
+            preliminary_categories[c_fid] = {"main": "综合领域", "sub": "默认分类"}
+
+    # 🔴 全局收敛洗牌：超过 4 篇文件时，启动同义词与异常分类合并
+    if len(files_to_categorize) > 4:
+        print(f"[试读斥候]: 文件较多 (共 {len(files_to_categorize)} 篇)，正在触发全局类别合并降噪...")
+        unique_pairs = set()
+        for cat in preliminary_categories.values():
+            unique_pairs.add(f"{cat['main']}/{cat['sub']}")
+            
+        merge_sys_msg = """你是一个分类对齐专家。以下是并发产生的初步分类列表，可能存在语义重复、粒度不一，或者误用“学术论文”等体裁名作为知识领域的问题。
+请合并同义词（如将“AI模型研究”合并入“人工智能”），规范化为统一的【知识领域】大类和小类。
+请输出 JSON 映射字典，格式为：
+{
+  "旧大类/旧小类": {"main": "新大类", "sub": "新小类"}
+}"""
+        merge_user_msg = "待合并的初步类别列表：\n" + json.dumps(list(unique_pairs), ensure_ascii=False)
+        
+        try:
+            merge_resp = llm.chat_completion([{"role": "system", "content": merge_sys_msg}, {"role": "user", "content": merge_user_msg}]).content
+            match = re.search(r'\{.*\}', merge_resp, re.DOTALL)
+            merge_mapping = json.loads(match.group(0))
+            
+            # 将映射好的新类写回
+            for c_fid, cat in preliminary_categories.items():
+                key = f"{cat['main']}/{cat['sub']}"
+                if key in merge_mapping:
+                    cat["main"] = merge_mapping[key].get("main", cat["main"])
+                    cat["sub"] = merge_mapping[key].get("sub", cat["sub"])
+        except Exception as e:
+            print(f"[合并异常] 类别映射失败，降级使用初步分类: {e}")
+
+    # --- 最终写入 Working Memory ---
+    if working_memory is not None:
+        for cat_fid, cat in preliminary_categories.items():
+            working_memory[f"Category_{cat_fid}"] = {"main": cat["main"], "sub": cat["sub"]}
+            
+    return _apply_caches_and_return()
+
 
 @ToolRegistry.register(
     name="verify_keyword_in_file",
@@ -107,13 +235,11 @@ def preview_document_content(file_paths: list = None, actual_file_ids: list = No
 - 参数: file_ids (目标文件虚拟ID数组), keywords (待验证的关键词字符串数组)"""
 )
 def verify_keyword_in_file(file_ids: list = None, keywords: list = None, agent_state=None, **kwargs) -> str:
-    # 1. 严格参数校验
     if not file_ids or not isinstance(file_ids, list): 
         return "[系统状态] 执行失败：未传入有效的目标文件ID数组(file_ids)。"
     if not keywords or not isinstance(keywords, list): 
         return "[系统状态] 执行失败：未提供需验证的关键词列表(keywords)。"
 
-    # 2. 内置强制导包，彻底杜绝 NameError 报错
     import os
     import re
     from utils.file_reader import read_local_file
@@ -121,9 +247,7 @@ def verify_keyword_in_file(file_ids: list = None, keywords: list = None, agent_s
     results = []
     global_found_kws = set()
     
-    # 3. 遍历文件检索
     for fid in file_ids:
-        # 直接从环境状态中取路径，防止路径映射异常
         if agent_state and hasattr(agent_state, 'id_to_path') and fid in agent_state.id_to_path:
             path = agent_state.id_to_path[fid]
         else:
@@ -136,7 +260,6 @@ def verify_keyword_in_file(file_ids: list = None, keywords: list = None, agent_s
             file_res = [f"📄 【{fname}】 验真结果:"]
             
             for kw in keywords:
-                # 转义搜索词中的特殊符号，防止正则崩溃
                 safe_kw = re.escape(str(kw))
                 matches = list(re.finditer(safe_kw, text, re.IGNORECASE))
                 count = len(matches)
@@ -144,7 +267,7 @@ def verify_keyword_in_file(file_ids: list = None, keywords: list = None, agent_s
                 if count == 0:
                     file_res.append(f"  - 关键词 '{kw}': 出现 0 次")
                 else:
-                    global_found_kws.add(str(kw))  # 记录该词在全局找到了
+                    global_found_kws.add(str(kw)) 
                     first_m = matches[0]
                     start = max(0, first_m.start() - 30)
                     end = min(len(text), first_m.end() + 30)
@@ -154,14 +277,11 @@ def verify_keyword_in_file(file_ids: list = None, keywords: list = None, agent_s
             results.append("\n".join(file_res))
             
         except Exception as e:
-            # 即使单文件读取失败（例如碰到不支持的格式），也能优雅降级而不崩溃
             results.append(f"📄 【{fname}】 验证读取失败: {str(e)}")
 
-    # 4. 全局状态纠偏：如果指定的关键词在**所有传入查询的文件中**都没有出现，才打上“无关”标签
     if agent_state and hasattr(agent_state, 'entity_audit') and agent_state.entity_audit:
         for kw in keywords:
             if str(kw) not in global_found_kws:
-                # 在状态树中寻找相关的实体
                 for ent in list(agent_state.entity_audit.keys()):
                     if str(kw).lower() in ent.lower() or ent.lower() in str(kw).lower():
                         agent_state.entity_audit[ent] = f"确认无关 (在指定的 {len(file_ids)} 个文件中均未检出，已打破强制关联)"
