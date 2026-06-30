@@ -1181,7 +1181,6 @@ export function App() {
 
   const markdown = useMemo(() => reportToMarkdown(report), [report]);
   const isAnyRunning = history.some((task) => task.status === "running");
-  const runningTask = history.find((task) => task.status === "running");
   const activeTaskItem = history.find((task) => task.id === activeId) || null;
   const reportScrollAffordance = useReportScrollAffordance(
     mainScrollRef,
@@ -1522,15 +1521,7 @@ export function App() {
                 />
               ) : null}
 
-              {!activeId && isAnyRunning && runningTask ? (
-                <ExecutionFeed
-                  progress={runningTask.progress}
-                  onStop={() => handleStopTask(runningTask.id)}
-                  task={runningTask}
-                />
-              ) : null}
-
-              {!activeId && !isAnyRunning ? (
+              {!activeId ? (
                 <LandingState
                   onSubmit={handleQuerySubmit}
                   isAnyRunning={isAnyRunning}
@@ -1569,7 +1560,7 @@ export function App() {
             </div>
           </main>
 
-          {activeId || isAnyRunning ? (
+          {activeId ? (
             <div className="z-20 shrink-0 bg-background px-5 py-3 md:px-8 lg:px-10">
               <div className="mx-auto w-full max-w-4xl">
                 <Composer
