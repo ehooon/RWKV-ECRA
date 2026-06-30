@@ -78,6 +78,163 @@ function parseTaskTime(taskId) {
   return `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
 }
 
+function getScrollShadowState(element) {
+  if (!element) return { canScrollUp: false, canScrollDown: false };
+
+  const scrollTop = element.scrollTop;
+  const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+
+  return {
+    canScrollUp: scrollTop > 1,
+    canScrollDown: scrollTop < maxScrollTop - 1,
+  };
+}
+
+function useScrollShadows(resolveElement, dependencies = []) {
+  const [shadows, setShadows] = useState({ canScrollUp: false, canScrollDown: false });
+
+  useEffect(() => {
+    const element = resolveElement();
+
+    if (!element) {
+      setShadows({ canScrollUp: false, canScrollDown: false });
+      return undefined;
+    }
+
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      setShadows(getScrollShadowState(element));
+    };
+    const requestUpdate = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(update);
+    };
+
+    update();
+    element.addEventListener("scroll", requestUpdate, { passive: true });
+    window.addEventListener("resize", requestUpdate);
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(requestUpdate) : null;
+    resizeObserver?.observe(element);
+    if (element.firstElementChild) {
+      resizeObserver?.observe(element.firstElementChild);
+    }
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      element.removeEventListener("scroll", requestUpdate);
+      window.removeEventListener("resize", requestUpdate);
+      resizeObserver?.disconnect();
+    };
+  }, dependencies);
+
+  return shadows;
+}
+
+function useReportScrollAffordance(scrollRef, surfaceRef, dependencies = []) {
+  const [affordance, setAffordance] = useState({
+    canScrollUp: false,
+    canScrollDown: false,
+    frame: null,
+  });
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    const surfaceElement = surfaceRef.current;
+
+    if (!scrollElement || !surfaceElement) {
+      setAffordance({ canScrollUp: false, canScrollDown: false, frame: null });
+      return undefined;
+    }
+
+    let animationFrame = 0;
+    const update = () => {
+      animationFrame = 0;
+
+      const scrollState = getScrollShadowState(scrollElement);
+      const scrollRect = scrollElement.getBoundingClientRect();
+      const surfaceRect = surfaceElement.getBoundingClientRect();
+      const left = Math.max(scrollRect.left, surfaceRect.left);
+      const right = Math.min(scrollRect.right, surfaceRect.right);
+      const isSurfaceVisible = surfaceRect.bottom > scrollRect.top && surfaceRect.top < scrollRect.bottom;
+
+      setAffordance({
+        canScrollUp: scrollState.canScrollUp && isSurfaceVisible,
+        canScrollDown: scrollState.canScrollDown && isSurfaceVisible,
+        frame: right > left
+          ? {
+              left,
+              width: right - left,
+              top: scrollRect.top,
+              bottom: window.innerHeight - scrollRect.bottom,
+            }
+          : null,
+      });
+    };
+
+    const requestUpdate = () => {
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(update);
+    };
+
+    update();
+    scrollElement.addEventListener("scroll", requestUpdate, { passive: true });
+    window.addEventListener("resize", requestUpdate);
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(requestUpdate) : null;
+    resizeObserver?.observe(scrollElement);
+    resizeObserver?.observe(surfaceElement);
+
+    return () => {
+      if (animationFrame) window.cancelAnimationFrame(animationFrame);
+      scrollElement.removeEventListener("scroll", requestUpdate);
+      window.removeEventListener("resize", requestUpdate);
+      resizeObserver?.disconnect();
+    };
+  }, dependencies);
+
+  return affordance;
+}
+
+function ScrollShadows({ canScrollUp, canScrollDown, variant = "panel", frame = null }) {
+  if (variant === "viewport") {
+    if (!frame) return null;
+
+    return (
+      <>
+        <div
+          className={cn("report-viewport-shadow report-scroll-shadow-top", canScrollUp && "is-visible")}
+          style={{
+            left: `${frame.left}px`,
+            top: `${frame.top}px`,
+            width: `${frame.width}px`,
+          }}
+          aria-hidden="true"
+        />
+        <div
+          className={cn("report-viewport-shadow report-scroll-shadow-bottom", canScrollDown && "is-visible")}
+          style={{
+            left: `${frame.left}px`,
+            bottom: `${frame.bottom}px`,
+            width: `${frame.width}px`,
+          }}
+          aria-hidden="true"
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className={cn("report-panel-shadow report-scroll-shadow-top", canScrollUp && "is-visible")} aria-hidden="true" />
+      <div className={cn("report-panel-shadow report-scroll-shadow-bottom", canScrollDown && "is-visible")} aria-hidden="true" />
+    </>
+  );
+}
+
 function buildFileTree(paths) {
   const root = { name: "root", type: "folder", children: {}, path: "" };
 
@@ -597,10 +754,10 @@ function TaskTimingCard({ task }) {
   ];
 
   return (
-    <section className="border-b border-border pb-5">
+    <section className="report-side-section">
       <div className="flex items-center gap-2 text-sm font-semibold">
-          <Clock3 className="size-4" />
-          任务时间线
+        <Clock3 className="size-4" />
+        任务时间线
       </div>
       <div className="mt-3 space-y-2">
         {entries.map(([label, value]) => (
@@ -622,12 +779,11 @@ function MetricsStrip({ report, task }) {
   const updatedAt = task?.updated_at || report?.updated_at || "-";
 
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-y border-border px-1 py-3 text-xs">
+    <div className="report-meta-strip">
       <div className="flex items-center gap-2">
         <span className="text-muted-foreground">状态</span>
         <TaskStatusBadge status={task?.status} className="px-1.5 py-0 text-[10px]" />
       </div>
-      <div className="hidden h-3 w-px bg-border sm:block" aria-hidden="true" />
       <div>
         <span className="text-muted-foreground">章节</span>
         <span className="ml-1.5 font-medium tabular-nums">{sectionCount}</span>
@@ -698,11 +854,11 @@ function OutlinePanel({ report, markdown }) {
   }, [activeSectionId]);
 
   return (
-    <aside className="sticky top-5 hidden max-h-[calc(100vh-7rem)] self-start overflow-hidden border-r border-border pr-4 2xl:block">
+    <aside className="report-outline-panel">
       <div className="mb-3 text-xs font-semibold text-foreground">目录</div>
-      <ScrollArea className="max-h-[calc(100vh-10rem)]">
+      <ScrollArea className="report-outline-scroll">
         {items.length ? (
-          <nav ref={outlineRef} className="space-y-0.5 pr-3" aria-label="报告目录">
+          <nav ref={outlineRef} className="space-y-0.5 pr-1" aria-label="报告目录">
             {items.map((item, index) => (
               <a
                 key={item.id}
@@ -736,57 +892,69 @@ function OutlinePanel({ report, markdown }) {
 }
 
 function SourcesPanel({ sources = [] }) {
+  const scrollRegionRef = useRef(null);
+  const sourceShadows = useScrollShadows(
+    useCallback(
+      () => scrollRegionRef.current?.querySelector('[data-slot="scroll-area-viewport"]'),
+      [],
+    ),
+    [sources.length],
+  );
+
   return (
-    <section className="flex flex-col min-h-0 flex-1 mt-5">
+    <section className="report-side-section report-sources-section">
       <div className="flex items-center justify-between gap-3 shrink-0">
         <h2 className="text-sm font-semibold">引用来源</h2>
         <span className="text-[10px] tabular-nums text-muted-foreground">{sources.length}</span>
       </div>
-      <ScrollArea className="mt-3 flex-1 min-h-0 h-[350px] 2xl:h-auto">
-        {sources.length ? (
-          <div className="divide-y divide-border pr-3 pb-12">
-            {sources.map((source) => (
-              <div
-                key={`${source.index}-${source.title}`}
-                id={`source-${source.index}`}
-                className="source-anchor py-3 first:pt-0"
-              >
-                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <a
-                    href={`#cite-ref-${source.index}`}
-                    className="font-mono font-semibold px-2 py-0.5 text-[11px] rounded bg-muted text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-all duration-300 citation-backlink border border-border inline-block"
-                    title="点击返回文章对应引用位置"
-                  >
-                    [{source.index}]
-                  </a>
-                  <span>{source.type === "web" ? "网页" : "本地文件"}</span>
-                </div>
-                <div className="mt-1.5 line-clamp-3 break-words text-xs leading-5 text-foreground/80">
-                  {source.url ? (
+      <div ref={scrollRegionRef} className="report-scroll-region mt-3 min-h-0 flex-1">
+        <ScrollArea className="report-sources-scroll h-full">
+          {sources.length ? (
+            <div className="space-y-1 pr-1 pb-12">
+              {sources.map((source) => (
+                <div
+                  key={`${source.index}-${source.title}`}
+                  id={`source-${source.index}`}
+                  className="source-anchor"
+                >
+                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                     <a
-                      href={source.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="decoration-border underline-offset-4 hover:underline"
+                      href={`#cite-ref-${source.index}`}
+                      className="citation-backlink"
+                      title="点击返回文章对应引用位置"
                     >
-                      {source.title || source.url}
+                      [{source.index}]
                     </a>
-                  ) : (
-                    <span>{source.title || "内部文档"}</span>
-                  )}
+                    <span>{source.type === "web" ? "网页" : "本地文件"}</span>
+                  </div>
+                  <div className="mt-1.5 line-clamp-3 break-words text-xs leading-5 text-foreground/80">
+                    {source.url ? (
+                      <a
+                        href={source.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="decoration-border underline-offset-4 hover:underline"
+                      >
+                        {source.title || source.url}
+                      </a>
+                    ) : (
+                      <span>{source.title || "内部文档"}</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-xs text-muted-foreground">无引用来源</div>
-        )}
-      </ScrollArea>
+              ))}
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">无引用来源</div>
+          )}
+        </ScrollArea>
+        <ScrollShadows {...sourceShadows} />
+      </div>
     </section>
   );
 }
 
-function ReportSurface({ report }) {
+function ReportSurface({ report, surfaceRef, scrollAffordance }) {
   if (!report) return null;
 
   function isMissingNodeContent(content) {
@@ -794,13 +962,19 @@ function ReportSurface({ report }) {
   }
 
   return (
-    <main className="min-w-0 border-x border-border bg-card">
-      <div className="mx-auto max-w-[82ch] px-7 py-8 md:px-10 md:py-10">
+    <main ref={surfaceRef} className="report-surface">
+      <ScrollShadows
+        variant="viewport"
+        canScrollUp={scrollAffordance?.canScrollUp}
+        canScrollDown={scrollAffordance?.canScrollDown}
+        frame={scrollAffordance?.frame}
+      />
+      <div className="report-reader">
         {report.nodes?.length ? (
-          <article className="space-y-14">
+          <article className="space-y-16">
             {report.nodes.map((node, index) => (
               <section key={node.id || index} id={`node-${index}`} className="scroll-mt-20">
-                <div className="mb-6 flex items-start gap-3 border-b border-border pb-4">
+                <div className="report-section-heading">
                   <span className="pt-1 font-mono text-[10px] tabular-nums text-muted-foreground">
                     {String(index + 1).padStart(2, "0")}
                   </span>
@@ -974,6 +1148,8 @@ export function App() {
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const mainScrollRef = useRef(null);
+  const reportSurfaceRef = useRef(null);
   const asyncPreferenceLoadedRef = useRef(false);
   const prevStatusRef = useRef(null);
 
@@ -1007,6 +1183,11 @@ export function App() {
   const isAnyRunning = history.some((task) => task.status === "running");
   const runningTask = history.find((task) => task.status === "running");
   const activeTaskItem = history.find((task) => task.id === activeId) || null;
+  const reportScrollAffordance = useReportScrollAffordance(
+    mainScrollRef,
+    reportSurfaceRef,
+    [Boolean(report), activeId],
+  );
 
   const selectReport = useCallback(async (id, items = history) => {
     setActiveId(id);
@@ -1138,12 +1319,11 @@ export function App() {
                 });
               }
               
-              // 🎯 让右侧对应的具体索引小标签块高亮
-              const labelBlock = targetElement.querySelector(".citation-backlink");
-              if (labelBlock) {
-                labelBlock.classList.add("bg-primary", "text-primary-foreground", "scale-105", "ring-2", "ring-primary/40");
+              // Highlight the full source row so the clicked citation has clear context.
+              if (targetElement.classList.contains("source-anchor")) {
+                targetElement.classList.add("source-anchor-highlight");
                 setTimeout(() => {
-                  labelBlock.classList.remove("bg-primary", "text-primary-foreground", "scale-105", "ring-2", "ring-primary/40");
+                  targetElement.classList.remove("source-anchor-highlight");
                 }, 1500);
               }
             }
@@ -1316,7 +1496,7 @@ export function App() {
             </div>
           </header>
 
-          <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <main ref={mainScrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             <div className="mx-auto flex min-h-full w-full max-w-[1680px] flex-col gap-5 px-5 py-5 md:px-8 lg:px-10">
               {error ? (
                 <Card className="border-rose-200 bg-rose-50 text-rose-700">
@@ -1365,18 +1545,22 @@ export function App() {
                 <div className="space-y-4">
                   <MetricsStrip report={report} task={activeTaskItem} />
 
-                  <div className="grid items-start 2xl:grid-cols-[220px_minmax(0,1fr)_292px]">
+                  <div className="report-workspace">
                     <OutlinePanel report={report} markdown={markdown} />
 
-                    <ReportSurface report={report} />
+                    <ReportSurface
+                      report={report}
+                      surfaceRef={reportSurfaceRef}
+                      scrollAffordance={reportScrollAffordance}
+                    />
 
-                    <aside className="sticky top-5 hidden h-[calc(100vh-7rem)] max-h-[calc(100vh-7rem)] flex-col self-start overflow-hidden pl-5 2xl:flex">
+                    <aside className="report-side-rail">
                       <TaskTimingCard task={activeTaskItem} />
                       <SourcesPanel sources={report?.sources || []} />
                     </aside>
                   </div>
 
-                  <div className="grid gap-6 border-t border-border pt-5 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] 2xl:hidden">
+                  <div className="report-secondary-panels">
                     <TaskTimingCard task={activeTaskItem} />
                     <SourcesPanel sources={report?.sources || []} />
                   </div>

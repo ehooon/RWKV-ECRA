@@ -238,6 +238,131 @@
     @apply pt-px font-mono text-[10px] text-muted-foreground;
   }
 
+  .report-meta-strip {
+    @apply flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md bg-secondary/90 px-3 py-2.5 text-xs;
+  }
+
+  .report-workspace {
+    @apply grid items-start gap-6;
+    --report-sticky-height: calc(100svh - 15.25rem);
+  }
+
+  .report-outline-panel {
+    @apply sticky top-5 hidden self-start overflow-hidden rounded-md bg-secondary/85 px-3 py-3 2xl:block;
+    max-height: var(--report-sticky-height);
+  }
+
+  .report-outline-scroll {
+    max-height: calc(var(--report-sticky-height) - 3rem);
+  }
+
+  .report-side-rail {
+    @apply sticky top-5 hidden flex-col gap-5 self-start overflow-hidden 2xl:flex;
+    height: var(--report-sticky-height);
+    max-height: var(--report-sticky-height);
+  }
+
+  .report-side-section {
+    @apply min-h-0 shrink-0 rounded-md bg-secondary/85 p-3;
+  }
+
+  .report-side-section + .report-side-section {
+    @apply mt-0;
+  }
+
+  .report-sources-section {
+    @apply flex flex-1 flex-col;
+  }
+
+  .report-scroll-region {
+    @apply relative overflow-hidden rounded-sm;
+  }
+
+  .report-panel-shadow,
+  .report-viewport-shadow {
+    @apply pointer-events-none opacity-0 transition-opacity duration-150;
+  }
+
+  .report-panel-shadow.is-visible,
+  .report-viewport-shadow.is-visible {
+    @apply opacity-100;
+  }
+
+  .report-panel-shadow {
+    @apply absolute right-0 left-0 z-10 h-8;
+  }
+
+  .report-viewport-shadow {
+    @apply fixed z-10 h-9;
+  }
+
+  .report-scroll-shadow-top {
+    top: 0;
+  }
+
+  .report-scroll-shadow-bottom {
+    bottom: 0;
+  }
+
+  .report-viewport-shadow.report-scroll-shadow-top {
+    background: linear-gradient(to bottom, oklch(1 0 0 / 0.98), oklch(1 0 0 / 0));
+  }
+
+  .report-viewport-shadow.report-scroll-shadow-bottom {
+    background: linear-gradient(to top, oklch(1 0 0 / 0.98), oklch(1 0 0 / 0));
+  }
+
+  .report-panel-shadow.report-scroll-shadow-top {
+    background: linear-gradient(
+      to bottom,
+      oklch(0.967 0.0029 264.5419 / 0.98),
+      oklch(0.967 0.0029 264.5419 / 0)
+    );
+  }
+
+  .report-panel-shadow.report-scroll-shadow-bottom {
+    background: linear-gradient(
+      to top,
+      oklch(0.967 0.0029 264.5419 / 0.98),
+      oklch(0.967 0.0029 264.5419 / 0)
+    );
+  }
+
+  .report-sources-scroll [data-slot="scroll-area-scrollbar"] {
+    opacity: 0;
+  }
+
+  .report-sources-scroll:hover [data-slot="scroll-area-scrollbar"],
+  .report-sources-scroll:focus-within [data-slot="scroll-area-scrollbar"] {
+    opacity: 1;
+  }
+
+  .report-secondary-panels {
+    @apply grid gap-5 lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] 2xl:hidden;
+  }
+
+  .report-secondary-panels .report-sources-section {
+    @apply h-[350px];
+  }
+
+  .report-surface {
+    @apply min-w-0 bg-card;
+  }
+
+  .report-reader {
+    @apply mx-auto max-w-[82ch] px-7 py-8 md:px-10 md:py-10;
+  }
+
+  .report-section-heading {
+    @apply mb-7 flex items-start gap-3;
+  }
+
+  @media (min-width: 96rem) {
+    .report-workspace {
+      grid-template-columns: 220px minmax(0, 1fr) 292px;
+    }
+  }
+
   .report-markdown {
     @apply text-[15px] leading-[1.95] text-foreground/90;
     text-wrap: pretty;
@@ -338,7 +463,7 @@
   }
 
   .citation-cluster {
-    @apply mb-6 border-y border-border/70 py-2;
+    @apply mb-6 rounded-md bg-muted/45 px-3 py-2;
   }
 
   .citation-cluster summary {
@@ -370,10 +495,44 @@
   }
 
   .source-anchor {
-    @apply transition-colors;
+    @apply rounded-md px-2 py-2.5 transition-colors;
+    transition-property: background-color, color, box-shadow;
+  }
+
+  .source-anchor:hover {
+    @apply bg-background/80;
+  }
+
+  .citation-backlink {
+    @apply inline-block rounded bg-foreground/[0.06] px-2 py-0.5 font-mono text-[11px] font-semibold text-muted-foreground transition-colors duration-150;
+  }
+
+  .citation-backlink:hover {
+    @apply bg-primary text-primary-foreground;
   }
 
   .source-anchor:target {
-    @apply bg-accent/35;
+    @apply bg-accent/45;
+  }
+
+  .source-anchor.source-anchor-highlight {
+    @apply bg-primary text-primary-foreground;
+    box-shadow: 0 0 0 2px oklch(0.6231 0.1880 259.8145 / 0.18);
+  }
+
+  .source-anchor.source-anchor-highlight *,
+  .source-anchor.source-anchor-highlight a {
+    color: var(--primary-foreground);
+  }
+
+  .source-anchor.source-anchor-highlight .citation-backlink {
+    @apply bg-primary-foreground text-primary;
+    background-color: var(--primary-foreground) !important;
+    color: var(--primary) !important;
+  }
+
+  .source-anchor.source-anchor-highlight .citation-backlink,
+  .source-anchor.source-anchor-highlight .citation-backlink * {
+    color: var(--primary) !important;
   }
 }
