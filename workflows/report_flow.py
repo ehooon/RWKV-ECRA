@@ -121,8 +121,8 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
     # 2. 全局二次压缩 (复用第一次 map_reduce 流程进行二次提炼)
     # ==========================================
     if total_tokens > token_limit:
-        print(f"\n🚨 [容量超限] 聚合素材池总字数 ({total_tokens} Tokens) 超出极限。")
-        print("🔄 正在触发全局降维 (直接复用第一次的 map_reduce_flow.py 进行二次提炼并重新绑定)...")
+        print(f"\n[容量超限] 聚合素材池总字数 ({total_tokens} Tokens) 超出极限。")
+        print("正在触发全局降维 (直接复用第一次的 map_reduce_flow.py 进行二次提炼并重新绑定)...")
         
         asset_paths = []
         origin_fids = []
@@ -165,13 +165,13 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                     
             static_sources = new_static_sources
             total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
-            print(f"   ✅ [MAP/REDUCE] 溯源重组完毕 -> 当前体积: {total_tokens} Tokens")
+            print(f"   [MAP/REDUCE] 溯源重组完毕 -> 当前体积: {total_tokens} Tokens")
 
         # ---------------------------------------------------------
-        # 💥 [防爆保障] 如果二次 MAP/REDUCE 压缩后仍旧超量，则执行按大类/小类并发写小报告的逻辑
+        # [防爆保障] 如果二次 MAP/REDUCE 压缩后仍旧超量，则执行按大类/小类并发写小报告的逻辑
         # ---------------------------------------------------------
         if total_tokens > token_limit:
-            print(f"\n🚨 [极限超载] 经过二次 MAP/REDUCE 提炼后体积仍然超限 ({total_tokens} Tokens)！启动大类/小类分批打包与 LLM 局部小报告生成机制...")
+            print(f"\n[极限超载] 经过二次 MAP/REDUCE 提炼后体积仍然超限 ({total_tokens} Tokens)！启动大类/小类分批打包与 LLM 局部小报告生成机制...")
             
             report_jobs = []
             main_cat_groups = {}
@@ -277,9 +277,9 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                     {
                         "role": "system",
                         "content": (
-                            f"你正在为最终大报告撰写一个【{job['title']}】分类小报告。\n"
-                            "请基于输入素材，高度提炼并聚合该分类下的核心事实，写成结构化 Markdown 小报告。\n"
-                            "绝对保留并照抄素材中的 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标！没有原文支撑的关联不要写。"
+                            f"基于输入素材为最终报告撰写一个【{job['title']}】分类小报告。\n"
+                            "高度提炼核心事实、发言人观点及具体数据数值（增减百分比、具体数据、精确时间节点等），写成结构化 Markdown。\n"
+                            "必须原样保留素材中的 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标。禁止虚构事实。"
                         )
                     },
                     {
@@ -310,7 +310,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                 max_workers = min(len(report_jobs), get_llm_concurrency())
                 print(f"   -> 准备完毕。正在并发生成 {len(report_jobs)} 份局部小报告 (分配线程数: {max_workers})...")
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    # 🔴 已修正: 使用 futures_dict 避免与下方的 future 循环命名冲突
                     futures_dict = {executor.submit(generate_small_report, idx, job): idx for idx, job in enumerate(report_jobs)}
                     for future in concurrent.futures.as_completed(futures_dict):
                         idx = futures_dict[future]
@@ -319,20 +318,20 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 
             static_sources = [report for report in small_reports if report]
             total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
-            print(f"✅ LLM 分类小报告汇聚完成！最终容量锁定在: {total_tokens} Tokens。")
+            print(f"LLM 分类小报告汇聚完成！最终容量锁定在: {total_tokens} Tokens。")
     else:
-        print(f"\n✅ 容量安全 ({total_tokens} Tokens)，直接进入最终研报生成阶段。")
+        print(f"\n容量安全 ({total_tokens} Tokens)，直接进入最终研报生成阶段。")
 
     # ==========================================
     # 3. 构造传递给大模型的 Context
     # ==========================================
     combined_text_parts = []
-    for i, src in enumerate(static_sources):
+    for src in static_sources:
         if src.get("is_web_raw"):
-            combined_text_parts.append(f"📖 [情报源 {i+1} | 互联网检索]\n{src['content']}")
+            combined_text_parts.append(f"[互联网检索]\n{src['content']}")
         else:
             tag_str = "".join([f"^{{{fid}}}^" for fid in src["ref_ids"]])
-            combined_text_parts.append(f"📖 [情报源 {i+1} | 本地档案 {tag_str}]\n{src['content']}")
+            combined_text_parts.append(f"[本地档案 {tag_str}]\n{src['content']}")
             
     combined_text = "\n\n".join(combined_text_parts)
     STATIC_CONTEXT_PREFIX = (
@@ -348,20 +347,18 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
     # ==========================================
     try:
         print(">> 1/3 正在生成报告骨架树(AST)...")
-        outline_sys_prompt = """任务：基于输入的目标和【全局可用情报素材池】，生成一份逻辑高度凝练的报告 AST 骨架。
+        outline_sys_prompt = """任务：基于输入目标和素材，生成一份逻辑紧凑的报告大纲。
 
-【🧠 核心分析与结构排版逻辑】
-1. 宏观主题聚类：你必须从杂乱无章的碎片素材中，提炼出具有逻辑穿透力的核心分析维度（例如：背景概述、核心技术、市场动态、风险挑战等）。
-2. 拒绝碎纸机式大纲：绝对不要把素材池中的“每一个单篇文章”或“每一个琐碎的子标题”直接映射为顶级章节！请合并同类项，将细碎的事实收拢到宏观维度中。
-3. 隔离但可共存：如果素材中包含多个相互独立、毫无关联的实体或项目，绝对不可强行编造它们之间的合作关系（防幻觉）。但你可以设立一个例如“各项目发展现状”的宏观章节，在章节内部进行分段论述，而不是为每个独立的实体都去新建一个顶级节点！
-4. 采用【总-分-总】结构。
-5. 【🔴 数量绝对限制】：必须高度提炼与聚合！整个大纲的节点总数必须严格控制在 3 到 7 个以内。
+规范：
+1. 主题聚类：将碎片事实提炼成宏观分析维度，合并同类项，禁止直接映射单篇微观大纲。
+2. 防幻觉：无关联的独立实体切勿强行编造联系，可放入统一现状章节内分段论述。
+3. 结构与规模：采用总分总结构，大纲节点总数控制在3到9个以内。
 
-输出 JSON 数组格式，包含 node_id 和 title 字段。示例：
+输出 JSON 数组格式（含 node_id 和 title）。示例：
 [
   {"node_id": "01_exec_summary", "title": "一、 全局执行摘要"},
-  {"node_id": "02_tech_analysis", "title": "二、 核心技术与架构剖析"},
-  {"node_id": "03_market_status", "title": "三、 相关实体与市场现状总览"},
+  {"node_id": "02_tech_analysis", "title": "二、 核心技术剖析"},
+  {"node_id": "03_market_status", "title": "三、 市场现状总览"},
   {"node_id": "04_conclusion", "title": "四、 综合研判与结论"}
 ]"""
         outline_resp = llm.chat_completion([
@@ -379,26 +376,24 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         
         print(f">> 2/3 正在并发与分批生成报告正文 (共 {len(nodes)} 个节点) ...")
         
-        writer_sys_prompt = """任务：根据全局 AST 骨架，撰写当前被分配的【特定批次节点】的正文内容。
+        writer_sys_prompt = """任务：根据大纲撰写指定节点的正文。
 
-【极为重要的溯源要求】
-你必须在阐述任何事实、结论时，严格照抄素材自带的溯源角标！
-- 本地素材头部会带有类似【本地档案 ^{DOC_1}^^{DOC_2}^】的标签，你在使用该段信息时句子末尾必须照抄：^{DOC_1}^^{DOC_2}^。
-- 网络素材正文自带类似 ^[WEB_REF_XXX]^ 的标签，直接照抄。
-- 绝对不要虚构角标！
+规范：
+1. 溯源角标：严格原样保留素材中的角标（如 ^{DOC_1}^ 或 ^[WEB_REF_XXX]^），禁止捏造角标。
+2. 精准事实与数据：必须保留并引用具体指标、增减变化数值、以及机构或个人的具体观点。若素材中包含精确的时间或日期，必须明确交代事件发生的时间线，严禁使用模糊词汇替代。
+3. 格式：禁止输出 JSON。必须且只能使用 XML 标签 <NODE id="节点ID">正文内容</NODE> 包裹。
 
-【防崩溃格式要求】
-为了防止格式解析崩溃，绝对不要输出 JSON！
-请严格使用 XML 标签 <NODE id="节点ID">包裹</NODE> 来输出每个节点的正文。
 示例：
 <NODE id="01_exec_summary">
-这里是节点正文...由于种种原因^{DOC_1}^^{DOC_2}^^[WEB_REF_456]^。
-</NODE>
-<NODE id="02_tech_analysis">
-这里是第二个节点的正文...
+正文内容...具体数值为12.5%^{DOC_1}^^[WEB_REF_456]^。
 </NODE>"""
 
-        beautify_sys_prompt = """任务：对输入的文本进行 Markdown 格式重构排版。不可修改事实内容。【绝对不可修改或删除】文中的 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标！仅输出格式化正文。"""
+        beautify_sys_prompt = """任务：对输入的 Markdown 进行格式美化。禁止修改任何事实内容，绝对不可删除或修改 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标。
+
+规范：
+1. 标题层级递进：严禁标题层级混用或跳跃（如：## 之后只能递进到 ###，严禁在二级标题下直接出现四级标题）。
+2. 全文一致性：同级标题在全文的逻辑和样式必须保持一致。
+3. 可读性优化：合理使用加粗和列表进行核心信息排版。"""
 
         def generate_node_batch(batch_nodes):
             batch_titles = [f"【{n.get('title')}】 (ID: {n.get('node_id')})" for n in batch_nodes]
@@ -444,16 +439,15 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         
         print(f"   -> 已将大纲拆分为 {len(batches)} 个批次，正在由 {max_workers} 个线程同时撰写正文...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 🔴 已修正: 使用 future_to_batch 以确保和下方逻辑变量名匹配
             future_to_batch = {executor.submit(generate_node_batch, b): b for b in batches}
             for future in concurrent.futures.as_completed(future_to_batch):
                 batch_ref = future_to_batch[future]
                 try:
                     res_map = future.result()
                     generated_results.update(res_map)
-                    print(f"   ✅ 批次完成: {', '.join([n.get('title', '')[:10]+'...' for n in batch_ref])}")
+                    print(f"   批次完成: {', '.join([n.get('title', '')[:10]+'...' for n in batch_ref])}")
                 except Exception as e:
-                    print(f"   ❌ 批次失败: {e}")
+                    print(f"   批次失败: {e}")
 
         # ==========================================
         # 5. 串行映射角标（保证编号按顺序）
@@ -547,13 +541,13 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         beautified_report_path = os.path.join(output_dir, f"{task_prefix}_02_深度排版溯源版.md")
         full_beautified = "# 最终深度分析研报\n\n" + "\n\n".join(final_beautified_parts)
         
-        reference_md = "\n\n---\n## 📚 结论与论据参考索引\n\n"
+        reference_md = "\n\n---\n## 结论与论据参考索引\n\n"
         if global_citation_list:
             for cite in sorted(global_citation_list, key=lambda x: x["index"]):
                 if cite["type"] == "web":
-                    reference_md += f"{cite['index']}. [🔗网络来源] [{cite['title']}]({cite['url']})\n"
+                    reference_md += f"{cite['index']}. [网络来源] [{cite['title']}]({cite['url']})\n"
                 else:
-                    reference_md += f"{cite['index']}. [📄本地文档] {cite['title']}\n"
+                    reference_md += f"{cite['index']}. [本地文档] {cite['title']}\n"
         else:
             reference_md += "*(本次研报生成未触发明确的源文引用角标)*\n"
             
@@ -589,7 +583,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         
         if agent_state:
             agent_state.is_finished = True
-            agent_state.final_result = f"极致分析完成！\n排版研报: {beautified_report_path}\n精准解耦溯源 JSONL: {jsonl_path}"
+            agent_state.final_result = f"分析完成。\n排版研报: {beautified_report_path}\n精准解耦溯源 JSONL: {jsonl_path}"
             
         return "执行结束"
         

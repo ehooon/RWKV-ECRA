@@ -69,6 +69,15 @@ def build_slm_web_search_compress_prompt(query: str, raw_text: str, goal: str) -
         f"Assistant: <think>\n</think>"
     )
 
+# 🌟 新增：极简自然语言物理防关联判断提示词 🌟
+def build_slm_relevance_judgment_prompt(mapped_text: str, query: str) -> str:
+    clean_text = _wash_slm_input(mapped_text)
+    return (
+        f"User: 判断这段文字是否和目标实体{query}相关。\n"
+        f"文字：\n{clean_text}\n\n"
+        f"Assistant: <think>\n</think>"
+    )
+
 def build_slm_tool_routing_prompt(llm_thought: str, tool_interfaces: str) -> str:
     clean_thought = _wash_slm_input(llm_thought)
     clean_tools = _wash_slm_input(tool_interfaces)

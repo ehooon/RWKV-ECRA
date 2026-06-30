@@ -8,12 +8,12 @@ from config import API_KEYS, SEARCH_CONFIG, DATA_PIPELINE, get_llm_provider, get
 from tools.registry import ToolRegistry
 from clients.slm_client import SLMClient
 from clients.llm_client import LLMClient
-from prompts.slm_prompts import build_slm_web_search_compress_prompt, build_slm_reduce_prompt
+from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_relevance_judgment_prompt, build_slm_reduce_prompt
 from utils.chunker import get_token_count, semantic_chunk_text
 
 slm_client = SLMClient()
 
-EMPTY_WEB_FACT_MARKERS = ("未找到", "无实质内容", "None")
+EMPTY_WEB_FACT_MARKERS = ("未找到", "无实质内容", "None", "无")
 
 def _clean_slm_web_output(output: str) -> str:
     if not output:
@@ -181,7 +181,6 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
         queries_to_run = _generate_search_queries(query, active_goal)
         print(f"[Web Search]: 🧠 AI 动态扩展多维检索词: {queries_to_run}")
         
-        # 🟢 修复1：完全读取 SEARCH_CONFIG
         s_depth = SEARCH_CONFIG.get("search_depth", "basic")
         s_max_res = SEARCH_CONFIG.get("max_results", 4)
         s_time_range = SEARCH_CONFIG.get("time_range", "month")
@@ -226,45 +225,97 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
         
         prompts = []
         prompt_metadata = []
-        # 🟢 修复2：读取 DATA_PIPELINE.get("max_chunk_tokens") 和 overlap_ratio
         max_chunk = DATA_PIPELINE.get("max_chunk_tokens", 800)
         overlap_ratio = DATA_PIPELINE.get("overlap_ratio", 0.05)
         
+        # 1. Map 提炼阶段
         for r in unique_results:
             title = r.get("title", "未命名网页").strip()
             web_ref_id = f"WEB_REF_TV_{uuid.uuid4().hex[:6]}"
             chunks = semantic_chunk_text(r.get("content", "").strip(), max_tokens=max_chunk, overlap_ratio=overlap_ratio)
-            for chunk in chunks:
-                prompts.append(build_slm_web_search_compress_prompt(query, f"【标题】: {title}\n【片段】: {chunk}", active_goal))
+            for idx, chunk in enumerate(chunks):
+                chunk_with_title = f"【标题】: {title}\n【片段】: {chunk}"
+                # 🌟 Map 直接复用：传入标准 Map 提示词，focus 设为检索实体
+                map_prompt = build_slm_sequential_summary_prompt(
+                    chunk_str=chunk_with_title,
+                    current_idx=idx + 1,
+                    total_chunks=len(chunks),
+                    focus=query,
+                    is_english=False
+                )
+                prompts.append(map_prompt)
                 prompt_metadata.append({"ref_id": web_ref_id, "title": title, "url": r.get("url", "")})
             
-        print(f"[Web Search]: 🛡️ 启动 SLM 全文隔离与目标去噪 (共 {len(prompts)} 个分块)...")
-        all_responses = []
+        print(f"[Web Search]: 🛡️ 启动 SLM 全文隔离 Map 提炼 (共 {len(prompts)} 个分块)...")
+        mapped_responses = []
         task_id = agent_state.task_id if agent_state and getattr(agent_state, "task_id", "") else kwargs.get("task_id")
         slm_scheduler = kwargs.get("slm_scheduler")
         concurrency_limit = get_slm_concurrency()
         for i in range(0, len(prompts), concurrency_limit):
             prompt_batch = prompts[i:i+concurrency_limit]
             if slm_scheduler:
-                all_responses.extend(slm_scheduler.submit(prompt_batch, tracker=tracker, task_id=task_id))
+                mapped_responses.extend(slm_scheduler.submit(prompt_batch, tracker=tracker, task_id=task_id))
             else:
-                all_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
+                mapped_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
             
-        reduce_tasks = []
-        reduce_metadata = []
-        sources_map = {}
-        for idx, out in enumerate(all_responses):
+        # 2. 相关性分析判定阶段
+        judge_prompts = []
+        judge_metadata = []
+        for idx, out in enumerate(mapped_responses):
             if idx >= len(prompt_metadata): break
             clean_out = _clean_slm_web_output(out)
             if _is_empty_web_fact(clean_out): continue
-            meta = prompt_metadata[idx]
-            ref_id = meta["ref_id"]
+            
+            # 🌟 极简自然语言提示词：“判断这段文字是否和目标实体{}相关”
+            judge_prompt = build_slm_relevance_judgment_prompt(clean_out, query)
+            judge_prompts.append(judge_prompt)
+            judge_metadata.append({
+                "meta": prompt_metadata[idx],
+                "mapped_text": clean_out
+            })
+            
+        judged_responses = []
+        if judge_prompts:
+            print(f"[Web Search]: 🛡️ 启动 SLM 相关性分析判定 (共 {len(judge_prompts)} 个分块)...")
+            for i in range(0, len(judge_prompts), concurrency_limit):
+                prompt_batch = judge_prompts[i:i+concurrency_limit]
+                if slm_scheduler:
+                    judged_responses.extend(slm_scheduler.submit(prompt_batch, tracker=tracker, task_id=task_id))
+                else:
+                    judged_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
+                    
+        # 3. 过滤出确实相关的客观事实
+        retained_facts = []
+        for idx, out in enumerate(judged_responses):
+            clean_judge = _clean_slm_web_output(out)
+            lower_judge = clean_judge.lower()
+            
+            # 🌟 仅判断是否相关，其余任务一概不涉及
+            is_related = True
+            if any(kw in lower_judge for kw in ["不相关", "无关", "没有关系", "不符合", "not related", "unrelated", "no relationship"]):
+                is_related = False
+                
+            if is_related:
+                item = judge_metadata[idx]
+                meta = item["meta"]
+                retained_facts.append({
+                    "ref_id": meta["ref_id"],
+                    "title": meta["title"],
+                    "url": meta["url"],
+                    "fact": item["mapped_text"]
+                })
+
+        # 4. Reduce 阶段组装
+        reduce_tasks = []
+        reduce_metadata = []
+        sources_map = {}
+        for item in retained_facts:
+            ref_id = item["ref_id"]
             if ref_id not in sources_map:
-                sources_map[ref_id] = {"title": meta["title"], "url": meta["url"], "facts": []}
-            sources_map[ref_id]["facts"].append(clean_out)
+                sources_map[ref_id] = {"title": item["title"], "url": item["url"], "facts": []}
+            sources_map[ref_id]["facts"].append(item["fact"])
 
         reduce_group_size = DATA_PIPELINE.get("reduce_group_size", 4)
-        # 🟢 修复3：严格读取并传入 config 的 reduce_rule，而不是用 active_goal 代替
         actual_reduce = DATA_PIPELINE.get("reduce_rule", "保持原意压缩，去重并合并同类逻辑，绝对保留事实性数据和原始结论")
         
         for ref_id, source in sources_map.items():

@@ -737,14 +737,14 @@ function OutlinePanel({ report, markdown }) {
 
 function SourcesPanel({ sources = [] }) {
   return (
-    <section>
-      <div className="flex items-center justify-between gap-3">
+    <section className="flex flex-col min-h-0 flex-1 mt-5">
+      <div className="flex items-center justify-between gap-3 shrink-0">
         <h2 className="text-sm font-semibold">引用来源</h2>
         <span className="text-[10px] tabular-nums text-muted-foreground">{sources.length}</span>
       </div>
-      <ScrollArea className="mt-3 max-h-[calc(100vh-19rem)]">
+      <ScrollArea className="mt-3 flex-1 min-h-0 h-[350px] 2xl:h-auto">
         {sources.length ? (
-          <div className="divide-y divide-border pr-3">
+          <div className="divide-y divide-border pr-3 pb-12">
             {sources.map((source) => (
               <div
                 key={`${source.index}-${source.title}`}
@@ -752,7 +752,13 @@ function SourcesPanel({ sources = [] }) {
                 className="source-anchor py-3 first:pt-0"
               >
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                  <span className="font-mono">[{source.index}]</span>
+                  <a
+                    href={`#cite-ref-${source.index}`}
+                    className="font-mono font-semibold px-2 py-0.5 text-[11px] rounded bg-muted text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-all duration-300 citation-backlink border border-border inline-block"
+                    title="点击返回文章对应引用位置"
+                  >
+                    [{source.index}]
+                  </a>
                   <span>{source.type === "web" ? "网页" : "本地文件"}</span>
                 </div>
                 <div className="mt-1.5 line-clamp-3 break-words text-xs leading-5 text-foreground/80">
@@ -1104,6 +1110,68 @@ export function App() {
     }
   }, [asyncEnabled, isAnyRunning, taskQueue, isSubmitting]);
 
+  // 双向精确追踪及局部标签防干扰高亮模块
+  useEffect(() => {
+    const handleScrollJump = (event) => {
+      // 1. 点击主体内容角标 -> 滚动右侧文献栏并高亮右侧对应小标签块
+      const badge = event.target.closest(".citation-badge");
+      if (badge) {
+        const href = badge.getAttribute("href");
+        if (href && href.startsWith("#source-")) {
+          event.preventDefault(); // 阻止浏览器默认锚点造成的全局大滚动
+          const targetId = href.substring(1);
+          const targetElement = document.getElementById(targetId);
+          if (targetElement) {
+            const viewport = targetElement.closest('[data-slot="scroll-area-viewport"]');
+            if (viewport) {
+              const viewportRect = viewport.getBoundingClientRect();
+              const targetRect = targetElement.getBoundingClientRect();
+              
+              // 检查目标当前是否已经在侧边栏可视范围内
+              const isVisible = (targetRect.top >= viewportRect.top) && (targetRect.bottom <= viewportRect.bottom);
+              if (!isVisible) {
+                // 计算精确偏移量滚动侧边栏
+                const relativeTop = targetRect.top - viewportRect.top + viewport.scrollTop;
+                viewport.scrollTo({
+                  top: relativeTop - 15, // 顶部预留舒服的距离，不强求居中
+                  behavior: "smooth"
+                });
+              }
+              
+              // 🎯 让右侧对应的具体索引小标签块高亮
+              const labelBlock = targetElement.querySelector(".citation-backlink");
+              if (labelBlock) {
+                labelBlock.classList.add("bg-primary", "text-primary-foreground", "scale-105", "ring-2", "ring-primary/40");
+                setTimeout(() => {
+                  labelBlock.classList.remove("bg-primary", "text-primary-foreground", "scale-105", "ring-2", "ring-primary/40");
+                }, 1500);
+              }
+            }
+          }
+        }
+        return;
+      }
+
+      // 2. 点击右侧引用索引小标签块 -> 【仅】将左侧主体对应引用角标滚动至显露（不增加任何高亮）
+      const backlink = event.target.closest(".citation-backlink");
+      if (backlink) {
+        const href = backlink.getAttribute("href");
+        if (href && href.startsWith("#cite-ref-")) {
+          event.preventDefault(); // 阻止浏览器默认锚点造成的全局大滚动
+          const targetId = href.substring(1);
+          const targetElement = document.getElementById(targetId);
+          if (targetElement) {
+            // 只在需要时滚动到可见区边缘，且不让报告主体的第一个对应索引号高亮
+            targetElement.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          }
+        }
+      }
+    };
+
+    document.addEventListener("click", handleScrollJump);
+    return () => document.removeEventListener("click", handleScrollJump);
+  }, []);
+
   function handleNewRun() {
     setActiveId(null);
     setReport(null);
@@ -1302,7 +1370,7 @@ export function App() {
 
                     <ReportSurface report={report} />
 
-                    <aside className="sticky top-5 hidden max-h-[calc(100vh-7rem)] self-start overflow-hidden pl-5 2xl:block">
+                    <aside className="sticky top-5 hidden h-[calc(100vh-7rem)] max-h-[calc(100vh-7rem)] flex-col self-start overflow-hidden pl-5 2xl:flex">
                       <TaskTimingCard task={activeTaskItem} />
                       <SourcesPanel sources={report?.sources || []} />
                     </aside>
