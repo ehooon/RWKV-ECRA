@@ -9,7 +9,7 @@
     "volcengine": {
       "base_url": "https://ark.cn-beijing.volces.com/api/v3",
       "model": "doubao-seed-2-0-lite-260428",
-      "reasoning_effort": "medium"
+      "reasoning_effort": "low"
     },
     "baidu": {
       "base_url": "https://aistudio.baidu.com/llm/lmapi/v3",
@@ -38,8 +38,8 @@
     "reduce_max_tokens": 32000,
     "slm_reduce_steps": 2,
     "llm_safe_window_tokens": 60000,
-    "map_focus": "保持原意压缩，提取核心逻辑，严格保留所有事实性内容",
-    "reduce_rule": "保持原意压缩，去重并合并同类逻辑，绝对保留事实性数据和原始结论",
+    "map_focus": "保持原意压缩，保留所有事实性内容",
+    "reduce_rule": "保持原意压缩，保留事实性数据和原始结论",
     "map_focus_en": "Compress while maintaining original meaning, extract core logic, strictly preserve all factual content",
     "reduce_rule_en": "Compress while maintaining original meaning, deduplicate and merge similar logic, absolutely preserve factual data and original conclusions",
     "english_ratio_threshold": 0.5,
@@ -55,7 +55,7 @@
     "concurrency": 6
   },
   "SLM_CONFIG": {
-    "endpoint": "http://192.168.0.82:8080/v1/chat/completions",
+    "endpoint": "http://192.168.0.82:8008/v1/chat/completions",
     "password": "rwkv7_7.2b",
     "concurrency": 128,
     "enable_async_parallel": false,
