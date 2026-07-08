@@ -132,3 +132,8 @@ export async function uploadFile(fileList) {
   if (data.code && data.code !== 200) throw new Error(data.message);
   return data;
 }
+
+export async function getTokenUsage() {
+  const payload = await apiFetch("/frontend-api/tokens");
+  return payload.data || { tasks: {} };
+}

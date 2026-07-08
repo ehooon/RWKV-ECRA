@@ -9,6 +9,7 @@ from collections import deque
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, Set
+
 from agent.analyzer import Analyzer
 from agent.planner import Planner
 from utils.tracker import EventTracker
@@ -16,6 +17,7 @@ from clients.slm_client import SLMClient
 from config import TRACKING, DATA_PIPELINE, get_slm_async_batch_wait_ms, get_slm_async_enabled, get_slm_async_parallelism, get_slm_concurrency
 from tools.registry import ToolRegistry
 from utils.chunker import get_token_count
+from utils.token_tracker import global_token_tracker
 from utils.task_manager import is_task_stopped, update_task_progress
 from workflows.report_flow import generate_final_aggregate_reports
 import tools.static_ops 
@@ -132,9 +134,23 @@ class SLMInputScheduler:
     def _process_batch(self, batch):
         try:
             print(f"[SLM 输入队列] 发射 {len(batch)} 个片段 | 首任务: {batch[0].task_id}")
-            results = SLMClient(endpoint_override=batch[0].endpoint, password_override=batch[0].password).batch_generate([item.content for item in batch])
+            
+            # 1. 🚀 发送前计费：统计批次中每个片段的 Input Token
+            for item in batch:
+                in_toks = get_token_count(item.content)
+                global_token_tracker.add_slm(in_toks, 0, task_id=item.task_id)
+
+            # 调用 direct 底层方法绕开默认的总额计费，避免重复
+            client = SLMClient(endpoint_override=batch[0].endpoint, password_override=batch[0].password)
+            results = client._batch_generate_direct([item.content for item in batch])
+            
             for item, result in zip(batch, results):
                 item.result = result
+                
+                # 2. 📥 返回后计费：统计真实生成的 Output Token
+                out_toks = get_token_count(result)
+                global_token_tracker.add_slm(0, out_toks, task_id=item.task_id)
+
                 if item.tracker:
                     item.tracker.track_slm(input_prompt=item.content, output_text=result, task_id=item.task_id)
         except Exception as exc:
@@ -233,14 +249,11 @@ class AgentState:
             "核心防幻觉红线：本地工作区中的文件可能是【完全独立、毫无关联】的，不要在无原文依据时捏造它们的合作关系！"
         ]
         
-        # 静态代码状态检查注入
         lines.append(f"📊 静态代码审计提醒：总共 {len(self.id_to_path)} 份文件中，仍有 {len(pending_items)} 份未被处理（系统防漏缺扫描）！")
         lines.append("💡 快捷通配符：如果缺口是需要处理大量未读文件，在调用工具的 file_ids 时可直接传入 [\"ALL\"]，底层引擎会自动将所有剩余未处理文件安全映射展开！")
         
-        lines.append(f"\n剩余清单 (展示前15项)：")
-        lines.extend(pending_items[:15])
-        if len(pending_items) > 15:
-            lines.append(f"... (已隐藏剩余 {len(pending_items)-15} 个文件)")
+        lines.append(f"\n剩余清单 (共 {len(pending_items)} 项)：")
+        lines.extend(pending_items)
             
         return "\n".join(lines)
 
@@ -350,7 +363,6 @@ class Orchestrator:
                     
                 abandoned = analysis.get("abandoned_file_ids", {})
                 abandoned_reasons = {}
-                # 向下兼容大模型错误输出为数组的情况
                 if isinstance(abandoned, list):
                     self.state.abandoned_file_ids.update(abandoned)
                     abandoned_reasons = {fid: "未提供屏蔽原因" for fid in abandoned}
@@ -375,10 +387,8 @@ class Orchestrator:
                 plan = self.planner.plan_next_action(user_query, analysis, context_text, phase)
                 action, args = plan["action"], plan["args"]
 
-                # ======== 🔴 全局收网对比审计逻辑 ========
                 intent = analysis.get("intent_mode", "BROAD_ANALYSIS")
                 
-                # 拦截大模型过早结束：比对资产库目标，强制将遗漏文件送去提取
                 if intent == "BROAD_ANALYSIS" and action in ["generate_final_aggregate_reports", "finish_task", "batch_process_individual_reports"]:
                     missing_extract = []
                     for fid in self.state.id_to_path.keys():
@@ -392,7 +402,6 @@ class Orchestrator:
                         args = {"file_ids": missing_extract}
                         phase = "EXTRACTION"
 
-                # ======== 🔴 ALL 通配符解析 & 静态兜底逻辑 ========
                 if "file_ids" in args:
                     original_fids = args.get("file_ids", [])
                     if isinstance(original_fids, str): original_fids = [original_fids]
@@ -400,7 +409,6 @@ class Orchestrator:
                     
                     has_all_macro = any(str(f).upper() == "ALL" for f in original_fids)
                     
-                    # 触发条件：大模型主动传入 ["ALL"]，或者泛读模式防幻觉兜底
                     if has_all_macro or (intent == "BROAD_ANALYSIS" and action in ["preview_document_content", "delegate_to_small_models"]):
                         all_pending = []
                         for fid, path in self.state.id_to_path.items():
@@ -427,10 +435,8 @@ class Orchestrator:
                             else:
                                 print(f"🔧 [静态代码兜底] 检测到存在漏读文件，强制将剩余 {len(all_pending)} 个文件绑定至 {action}！")
 
-                        # 剔除数组中的 "ALL" 字样
                         original_fids = [f for f in original_fids if str(f).upper() != "ALL"]
                         args["file_ids"] = original_fids
-                # ====================================================
 
                 print(f"[工具调用]: -> {action}()")
 
@@ -485,9 +491,7 @@ class Orchestrator:
                     if "排版研报" not in str(self.state.final_result) and not is_task_stopped(self.state.task_id):
                         print("\n[系统兜底] 检测到任务结束，强制调起聚合引擎...")
                         push_progress("🔧 检测到任务闭环，正在生成最终聚合研报...")
-                        
                         generate_final_aggregate_reports(working_memory=self.state.working_memory, tracker=self.tracker, agent_state=self.state)
-                    
                     break
 
             except Exception as e:
@@ -496,7 +500,7 @@ class Orchestrator:
                 traceback.print_exc()
                 push_progress(error_msg)
                 
-                self.state.last_feedback = f"上一步执行出现严重异常: {str(e)}。请反思调用参数是否符合要求，或尝试调用其他工具。"
+                self.state.last_feedback = f"上一步执行出现异常: {str(e)}。请检查你的工具调用参数。"
 
         if not self.state.is_finished and not is_task_stopped(self.state.task_id):
             print("\n[系统兜底] 达到最大探索步数，强制调起聚合引擎...")

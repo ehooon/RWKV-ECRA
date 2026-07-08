@@ -12,6 +12,7 @@ from typing import Optional, List
 import config
 from agent.orchestrator import Orchestrator
 from utils.task_manager import record_task, get_all_tasks, request_stop, delete_task, is_task_stopped
+from utils.token_tracker import global_token_tracker, current_task_id
 from main import setup_env
 import glob
 
@@ -29,7 +30,7 @@ class AnalyzeRequest(BaseModel):
     llm_provider: Optional[str] = None
     slm_endpoint: Optional[str] = None
     slm_password: Optional[str] = None
-    queued_at: Optional[str] = None  # ✨ 新增：接收前端点击发送时的排队时间
+    queued_at: Optional[str] = None  
     slm_async_enabled: Optional[bool] = None
 
 # =====================================
@@ -73,7 +74,34 @@ def cleanup_environment():
                         shutil.rmtree(file_path)
                 except Exception as e:
                     pass
+                    
+    # 🌟 一并清零 Token 全局与历史任务计数器
+    global_token_tracker.reset()
+    
     return {"code": 200, "message": "运行环境及缓存已重置"}
+
+# =====================================
+# ✨ 新增：Token 账本双重查询接口
+# =====================================
+@app.get("/api/v1/metrics/tokens")
+@app.get("/frontend-api/metrics/tokens")
+def get_global_token_metrics():
+    """实时获取系统 SLM 和 LLM 的全局 Tokens 总开销和所有历史任务数据"""
+    return {
+        "code": 200,
+        "message": "success",
+        "data": global_token_tracker.get_stats()
+    }
+
+@app.get("/api/v1/metrics/tokens/{task_id}")
+@app.get("/frontend-api/metrics/tokens/{task_id}")
+def get_task_token_metrics(task_id: str):
+    """精准获取某一个历史任务的 Token 开销"""
+    return {
+        "code": 200,
+        "message": "success",
+        "data": global_token_tracker.get_stats(task_id)
+    }
 
 # =====================================
 # 3. 文件夹感知的文件管理 API 
@@ -131,6 +159,9 @@ def get_input_file(path: str):
 # 4. 核心执行接口 (后台异步挂载)
 # =====================================
 def background_analyze(task_id: str, req: AnalyzeRequest, task_output_dir: str):
+    # ✨ 核心绑定：在当前执行上下文中注入 task_id，后续所有 LLM 的子线程调用都能感知到
+    token_ctx = current_task_id.set(task_id)
+    
     if req.llm_api_key: config.override_llm_key.set(req.llm_api_key)
     if req.llm_base_url: config.override_llm_url.set(req.llm_base_url)
     if req.llm_provider: config.override_llm_provider.set(req.llm_provider)
@@ -153,6 +184,7 @@ def background_analyze(task_id: str, req: AnalyzeRequest, task_output_dir: str):
         config.override_slm_endpoint.set(None)
         config.override_slm_password.set(None)
         config.override_slm_async_enabled.set(None)
+        current_task_id.reset(token_ctx)
 
 @app.get("/frontend-api/config")
 def get_frontend_config():
@@ -172,7 +204,6 @@ def analyze_endpoint(req: AnalyzeRequest, bg_tasks: BackgroundTasks):
     task_id = f"TASK_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
     task_output_dir = os.path.join(config.DATA_PIPELINE["output_directory"], task_id)
     
-    # ✨ 这里透传 queued_at
     record_task(task_id, req.query, "running", task_output_dir, queued_at=req.queued_at)
     bg_tasks.add_task(background_analyze, task_id, req, task_output_dir)
     
@@ -221,7 +252,6 @@ def get_task_report(task_id: str):
     jsonl_candidates = []
     md_candidates = []
     
-    # 🌟 强力扫描：无视文件夹特殊字符，遍历查找内部所有的 JSONL 和 MD
     for root_dir, _, files in os.walk(task_output_dir):
         for f in files:
             full_path = os.path.join(root_dir, f)
@@ -230,9 +260,7 @@ def get_task_report(task_id: str):
             elif f.endswith(".md"):
                 md_candidates.append(full_path)
 
-    # 优先解析结构化 JSONL 数据
     if jsonl_candidates:
-        # 按照修改时间排序，取最新的
         target = sorted(jsonl_candidates, key=os.path.getmtime, reverse=True)[0]
         report_data = []
         with open(target, "r", encoding="utf-8") as f:
@@ -241,14 +269,12 @@ def get_task_report(task_id: str):
                     report_data.append(json.loads(line.strip()))
         return {"code": 200, "data": report_data}
         
-    # 降级：只有 Markdown，自动包装并下发给前端
     if md_candidates:
         target = sorted(md_candidates, key=os.path.getmtime, reverse=True)[0]
         with open(target, "r", encoding="utf-8") as f:
             md_content = f.read()
         return {"code": 200, "data": [{"record_type": "final_beautified_markdown", "content": md_content}]}
 
-    # 🚨 注意：如果文件夹是空的，会报这句新的提示。
     return {"code": 404, "message": "系统已扫描文件夹，但未发现任何 JSONL 或 MD 格式的报告"}
 
 if __name__ == "__main__":

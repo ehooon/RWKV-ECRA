@@ -178,8 +178,15 @@ def preview_document_content(file_paths: list = None, actual_file_ids: list = No
     batches = [files_to_categorize[i:i+batch_size] for i in range(0, len(files_to_categorize), batch_size)]
     
     preliminary_categories = {}
+    
+    import contextvars
     with concurrent.futures.ThreadPoolExecutor(max_workers=get_llm_concurrency()) as executor:
-        futures = [executor.submit(_batch_categorize, b) for b in batches]
+        futures = []
+        # ✨ 修改：在循环内部，为每个子任务单独拷贝上下文
+        for b in batches:
+            ctx = contextvars.copy_context()
+            futures.append(executor.submit(ctx.run, _batch_categorize, b))
+            
         for future in concurrent.futures.as_completed(futures):
             res_json = future.result()
             if isinstance(res_json, dict):

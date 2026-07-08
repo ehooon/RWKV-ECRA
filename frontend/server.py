@@ -210,6 +210,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"code": 200, "data": collect_history()})
             return
 
+        if path == "/frontend-api/tokens":
+            token_file = OUTPUT_DIR / "global_token_usage.json"
+            if token_file.exists():
+                try:
+                    data = json.loads(token_file.read_text(encoding="utf-8"))
+                    self.send_json({"code": 200, "data": data})
+                except Exception as e:
+                    self.send_json({"code": 500, "message": str(e)}, status=500)
+            else:
+                self.send_json({"code": 200, "data": {"tasks": {}}})
+            return
+
         if path.startswith("/frontend-api/report/"):
             report_id = urllib.parse.unquote(path.rsplit("/", 1)[-1])
             try:

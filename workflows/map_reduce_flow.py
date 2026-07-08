@@ -64,7 +64,7 @@ def clean_slm_output(text: str) -> str:
                     
                     if match_all:
                         valid_lines = valid_lines[:-p*(repeats-1)]
-                        valid_lines.append("...[系统物理防浪涌：检测到模型陷入周期性复读，后续冗余已被彻底截断]...")
+                        valid_lines.append("...[检测到模型陷入周期性复读，后续冗余已被彻底截断]...")
                         is_repeating = True
                         break
                         
@@ -131,8 +131,14 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
                 return idx, False, str(e)
 
         max_workers = min(len(chunks), llm_concurrency)
+        
+        import contextvars
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_compress_single_chunk, i, c) for i, c in enumerate(chunks)]
+            futures = []
+
+            for i, c in enumerate(chunks):
+                ctx = contextvars.copy_context()
+                futures.append(executor.submit(ctx.run, _compress_single_chunk, i, c))
             
             for f in concurrent.futures.as_completed(futures):
                 idx, success, res = f.result()
@@ -142,8 +148,6 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
                 else:
                     compressed_pieces[idx] = ""
                     print(f"      ❌ 区块 {idx+1}/{len(chunks)} 压缩失败: {res}")
-            
-        current_text = "\n\n".join([p for p in compressed_pieces if p])
         
         new_tokens = get_token_count(current_text)
         new_ratio_str = f"(留存: {(new_tokens/original_file_tokens)*100:.1f}%)" if original_file_tokens else ""

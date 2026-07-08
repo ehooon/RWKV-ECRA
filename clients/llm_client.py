@@ -2,6 +2,7 @@
 from openai import OpenAI
 from config import get_llm_api_key, get_llm_base_url, get_llm_provider, get_llm_model, LLM_ENDPOINTS
 from utils.retry import retry_with_fallback
+from utils.token_tracker import global_token_tracker
 
 class LLMClient:
     def __init__(self):
@@ -55,6 +56,28 @@ class LLMClient:
             kwargs["tool_choice"] = {"type": "function", "function": {"name": "system_router"}}
             
         resp = self.client.chat.completions.create(**kwargs)
+        
+        # 🌟 拦截提取 Token 消耗（兼容 OpenAI 标准格式和火山定制返回）
+        if hasattr(resp, 'usage') and resp.usage:
+            try:
+                # 兼容不同 pydantic 版本的结构解析
+                if hasattr(resp.usage, "model_dump"):
+                    usage_dict = resp.usage.model_dump()
+                elif hasattr(resp.usage, "__dict__"):
+                    usage_dict = vars(resp.usage)
+                else:
+                    usage_dict = resp.usage if isinstance(resp.usage, dict) else {}
+                
+                in_tok = usage_dict.get("prompt_tokens") or usage_dict.get("input_tokens") or 0
+                out_tok = usage_dict.get("completion_tokens") or usage_dict.get("output_tokens") or 0
+                
+                # 深入提取火山引擎的思考 Token (reasoning_tokens)
+                details = usage_dict.get("completion_tokens_details") or usage_dict.get("output_tokens_details") or {}
+                reasoning_tok = details.get("reasoning_tokens") or 0
+                
+                global_token_tracker.add_llm(in_tok, out_tok, reasoning_tok)
+            except Exception as e:
+                print(f"⚠️ [Token Tracker] 大模型用量解析失败: {e}")
         
         # 🔴 拦截解析：提取附加的溯源信息（兼容 OpenAI SDK 对 extra_body 响应的处理）
         msg = resp.choices[0].message

@@ -13,6 +13,7 @@ from tools.registry import ToolRegistry
 from utils.chunker import get_token_count, semantic_chunk_text
 from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_reduce_prompt
 from workflows.map_reduce_flow import llm_plan_execute_check_compression, clean_slm_output, _sequential_assemble
+import contextvars
 
 def parse_md_blocks(md_text: str) -> Dict[str, str]:
     blocks = {}
@@ -118,7 +119,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
     token_limit = DATA_PIPELINE.get("llm_safe_window_tokens", 60000)
     
     # ==========================================
-    # 2. 全局二次压缩 (复用第一次 map_reduce 流程进行二次提炼)
+    # 2. 全局二次压缩
     # ==========================================
     if total_tokens > token_limit:
         print(f"\n[容量超限] 聚合素材池总字数 ({total_tokens} Tokens) 超出极限。")
@@ -136,10 +137,8 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                     origin_fids.append(fid)
                     
         if asset_paths:
-            # 局部导入避免循环引用
             from workflows.map_reduce_flow import delegate_to_small_models
             
-            # 直接复用 map1 提炼流程，传入原 origin_fids 保持绑定，开启 is_temporary 防止覆盖物理资产
             delegate_to_small_models(
                 file_paths=asset_paths,
                 actual_file_ids=origin_fids,
@@ -151,7 +150,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                 is_temporary=True
             )
             
-            # 重新加载压缩更新后的 content 内容，保持原始属性
             new_static_sources = []
             for src in static_sources:
                 if not src.get("is_web_raw") and src.get("ref_ids"):
@@ -167,9 +165,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             total_tokens = sum(get_token_count(s["content"]) for s in static_sources)
             print(f"   [MAP/REDUCE] 溯源重组完毕 -> 当前体积: {total_tokens} Tokens")
 
-        # ---------------------------------------------------------
-        # [防爆保障] 如果二次 MAP/REDUCE 压缩后仍旧超量，则执行按大类/小类并发写小报告的逻辑
-        # ---------------------------------------------------------
         if total_tokens > token_limit:
             print(f"\n[极限超载] 经过二次 MAP/REDUCE 提炼后体积仍然超限 ({total_tokens} Tokens)！启动大类/小类分批打包与 LLM 局部小报告生成机制...")
             
@@ -189,7 +184,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                 if mc_tokens <= token_limit:
                     report_jobs.append({"title": f"【大类聚合】{mc}", "sources": sources})
                 else:
-                    print(f"      -> 分类 [{mc}] 依然超限，向下拆分为细分领域...")
                     sub_cat_groups = {}
                     for s in sources:
                         sc = s.get("sub_cat", "综合应用")
@@ -201,7 +195,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                         if sc_tokens <= token_limit:
                             report_jobs.append({"title": f"【小类聚合】{mc}/{sc}", "sources": sc_sources})
                         else:
-                            print(f"      -> 细分领域 [{mc}/{sc}] 依然超限 ({sc_tokens} Tokens)，严格按篇目进行安全打包...")
                             job_sources = []
                             job_tokens = 0
                             part_idx = 1
@@ -209,9 +202,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                             
                             for src in sc_sources:
                                 src_tokens = get_token_count(src["content"])
-                                
                                 if src_tokens > small_report_limit:
-                                    print(f"         - 警告：单篇篇目庞大 ({src_tokens} Tokens)，触发文段裁切...")
                                     chunks = semantic_chunk_text(src["content"], max_tokens=small_report_limit, overlap_ratio=0.0)
                                     for c_idx, chunk in enumerate(chunks):
                                         chunk_src = src.copy()
@@ -279,7 +270,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                         "content": (
                             f"基于输入素材为最终报告撰写一个【{job['title']}】分类小报告。\n"
                             "高度提炼核心事实、发言人观点及具体数据数值（增减百分比、具体数据、精确时间节点等），写成结构化 Markdown。\n"
-                            "必须原样保留素材中的 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标。禁止虚构事实。"
+                            "必须严格原样保留素材中给出的引用角标，禁止自行编造。"
                         )
                     },
                     {
@@ -309,8 +300,15 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             if report_jobs:
                 max_workers = min(len(report_jobs), get_llm_concurrency())
                 print(f"   -> 准备完毕。正在并发生成 {len(report_jobs)} 份局部小报告 (分配线程数: {max_workers})...")
+                
+                import contextvars
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures_dict = {executor.submit(generate_small_report, idx, job): idx for idx, job in enumerate(report_jobs)}
+                    futures_dict = {}
+
+                    for idx, job in enumerate(report_jobs):
+                        ctx = contextvars.copy_context()
+                        futures_dict[executor.submit(ctx.run, generate_small_report, idx, job)] = idx
+                        
                     for future in concurrent.futures.as_completed(futures_dict):
                         idx = futures_dict[future]
                         res = future.result()
@@ -376,19 +374,20 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         
         print(f">> 2/3 正在并发与分批生成报告正文 (共 {len(nodes)} 个节点) ...")
         
+        # 🔴 提示词优化：彻底去除了对具体角标格式的举例，防止引导它自己脑补角标
         writer_sys_prompt = """任务：根据大纲撰写指定节点的正文。
 
 规范：
-1. 溯源角标：严格原样保留素材中的角标（如 ^{DOC_1}^ 或 ^[WEB_REF_XXX]^），禁止捏造角标。
+1. 溯源引用：严格引用素材原文中提供的角标。**绝对禁止自行编造或虚构角标内容**。
 2. 精准事实与数据：必须保留并引用具体指标、增减变化数值、以及机构或个人的具体观点。若素材中包含精确的时间或日期，必须明确交代事件发生的时间线，严禁使用模糊词汇替代。
 3. 格式：禁止输出 JSON。必须且只能使用 XML 标签 <NODE id="节点ID">正文内容</NODE> 包裹。
 
 示例：
 <NODE id="01_exec_summary">
-正文内容...具体数值为12.5%^{DOC_1}^^[WEB_REF_456]^。
+正文内容...
 </NODE>"""
 
-        beautify_sys_prompt = """任务：对输入的 Markdown 进行格式美化。禁止修改任何事实内容，绝对不可删除或修改 ^{DOC_...}^ 和 ^[WEB_REF_...]^ 角标。
+        beautify_sys_prompt = """任务：对输入的 Markdown 进行格式美化。禁止修改任何事实内容，绝对不可删除或修改原始文本中的引用角标。
 
 规范：
 1. 标题层级递进：严禁标题层级混用或跳跃（如：## 之后只能递进到 ###，严禁在二级标题下直接出现四级标题）。
@@ -438,8 +437,15 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         max_workers = min(len(batches), get_llm_concurrency())
         
         print(f"   -> 已将大纲拆分为 {len(batches)} 个批次，正在由 {max_workers} 个线程同时撰写正文...")
+        
+        import contextvars
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_batch = {executor.submit(generate_node_batch, b): b for b in batches}
+            future_to_batch = {}
+            # ✨ 修改：在循环内部，为每个子任务单独拷贝上下文
+            for b in batches:
+                ctx = contextvars.copy_context()
+                future_to_batch[executor.submit(ctx.run, generate_node_batch, b)] = b
+                
             for future in concurrent.futures.as_completed(future_to_batch):
                 batch_ref = future_to_batch[future]
                 try:
@@ -472,8 +478,10 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             
             def map_and_replace_citation(match, is_web):
                 ref_id = match.group(1)
+                
+                # 🔴 强制防幻觉拦截：如果在资产库里找不到该引用，直接将其清洗掉（返回空字符串）
                 if ref_id not in source_registry:
-                    return match.group(0) 
+                    return "" 
                     
                 src_meta = source_registry[ref_id]
                 matched_title = src_meta["title"]

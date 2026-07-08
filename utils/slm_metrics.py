@@ -1,3 +1,4 @@
+# RWKV-ECRA/utils/slm_metrics.py
 import json
 import os
 import threading
@@ -7,7 +8,6 @@ from datetime import datetime
 
 from config import TRACKING
 from utils.chunker import get_token_count
-
 
 class SLMThroughputMeter:
     def __init__(self):
@@ -74,9 +74,22 @@ class SLMThroughputMeter:
 
     def _write_json(self, path: str, payload: dict):
         tmp_path = path + ".tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, path)
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+                
+            # Windows 环境下，os.replace 极易因杀软或前端读取产生文件锁
+            # 加入短时重试机制，避开毫秒级的共享冲突
+            import time
+            for _ in range(5):
+                try:
+                    os.replace(tmp_path, path)
+                    break
+                except PermissionError:
+                    time.sleep(0.05)
+        except Exception as e:
+
+            print(f"[Metrics Warning] 吞吐量统计文件写入失败，已被安全忽略: {e}")
 
 
 slm_throughput_meter = SLMThroughputMeter()

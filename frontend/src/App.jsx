@@ -26,8 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
-
-import { getHistory, getReport, startAnalyze, stopTask, deleteTask, getFiles, deleteFile, getFileContent, uploadFile, getRuntimeConfig } from "./api.js";
+import { getHistory, getReport, startAnalyze, stopTask, deleteTask, getFiles, deleteFile, getFileContent, uploadFile, getRuntimeConfig, getTokenUsage } from "./api.js";
 import { extractMarkdownOutline, renderMarkdown, reportToMarkdown } from "./markdown.js";
 import { AppSidebar } from "@/components/app-sidebar";
 import { TaskStatusBadge } from "@/components/task-status-badge";
@@ -773,6 +772,53 @@ function TaskTimingCard({ task }) {
   );
 }
 
+function TokenUsageCard({ data }) {
+  if (!data) return null;
+
+  const rwkv = data.rwkv_slm || { input_tokens: 0, output_tokens: 0 };
+  const cloud = data.cloud_llm || { input_tokens: 0, output_tokens: 0, reasoning_tokens: 0 };
+  const totalRwkv = (rwkv.input_tokens || 0) + (rwkv.output_tokens || 0);
+  const totalCloud = (cloud.input_tokens || 0) + (cloud.output_tokens || 0) + (cloud.reasoning_tokens || 0);
+
+  if (totalRwkv === 0 && totalCloud === 0) return null;
+
+  return (
+    <section className="report-side-section shadow-lg border border-border/60 bg-secondary/95 backdrop-blur">
+      <div className="flex items-center gap-2 text-sm font-semibold">
+        <Gauge className="size-4 text-primary" />
+        Token 消耗统计
+      </div>
+      <div className="mt-4 space-y-3">
+        <div>
+          <div className="flex items-center justify-between text-[11px] mb-1">
+            <span className="text-muted-foreground font-medium">RWKV (本地基座)</span>
+            <span className="font-mono font-medium text-foreground/80">{totalRwkv.toLocaleString()}</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-3 text-[10px]">
+            <span className="text-muted-foreground/50">Input / Output</span>
+            <span className="font-mono tabular-nums text-muted-foreground/70">
+              {rwkv.input_tokens?.toLocaleString() || 0} / {rwkv.output_tokens?.toLocaleString() || 0}
+            </span>
+          </div>
+        </div>
+        
+        <div className="pt-2 border-t border-border/50">
+          <div className="flex items-center justify-between text-[11px] mb-1">
+            <span className="text-muted-foreground font-medium">Cloud LLM (云端推理)</span>
+            <span className="font-mono font-medium text-foreground/80">{totalCloud.toLocaleString()}</span>
+          </div>
+          <div className="flex items-baseline justify-between gap-3 text-[10px]">
+            <span className="text-muted-foreground/50">In / Out / Reason</span>
+            <span className="font-mono tabular-nums text-muted-foreground/70">
+              {cloud.input_tokens?.toLocaleString() || 0} / {cloud.output_tokens?.toLocaleString() || 0} / {cloud.reasoning_tokens?.toLocaleString() || 0}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function MetricsStrip({ report, task }) {
   const sectionCount = report?.nodes?.length || (report?.markdown ? 1 : 0);
   const sourceCount = report?.sources?.length || 0;
@@ -979,7 +1025,7 @@ function ReportSurface({ report, surfaceRef, scrollAffordance }) {
                     {String(index + 1).padStart(2, "0")}
                   </span>
                   <h2 className="text-[22px] font-semibold leading-8 tracking-[-0.02em] text-foreground">
-                    {node.title || `章节 ${index + 1}`}
+                    {(node.title || `章节 ${index + 1}`).replace(/^(?:第?[一二三四五六七八九十百]+[、，：\.]?\s*|\d+[\.、]\s*|（[一二三四五六七八九十百]+）\s*|\(\d+\)\s*)/, '')}
                   </h2>
                 </div>
                 {isMissingNodeContent(node.content) ? (
@@ -1141,6 +1187,7 @@ function LandingState({
 
 export function App() {
   const [history, setHistory] = useState([]);
+  const [tokenUsage, setTokenUsage] = useState({ tasks: {} });
   const [keyword, setKeyword] = useState("");
   const [activeId, setActiveId] = useState(null);
   const [report, setReport] = useState(null);
@@ -1197,7 +1244,7 @@ export function App() {
     } catch (reason) {
       const task = items.find((item) => item.id === id);
 
-      if (task?.status === "running") {
+      if (!task || task.status === "running" || task.status === "queued") {
         setReport(null);
         return;
       }
@@ -1212,6 +1259,7 @@ export function App() {
       setError("");
       const items = await getHistory();
       setHistory(items);
+      setTokenUsage(await getTokenUsage());
 
       const nextId = (selectFirst || !activeId) ? items[0]?.id : activeId;
 
@@ -1229,6 +1277,7 @@ export function App() {
   const pollHistory = useCallback(async () => {
     try {
       setHistory(await getHistory());
+      setTokenUsage(await getTokenUsage());
     } catch {}
   }, []);
 
@@ -1358,10 +1407,15 @@ export function App() {
   }
 
   async function handleNewTaskSubmitted(taskId) {
-    await refreshHistory(false);
-
-    if (taskId) {
-      await selectReport(taskId);
+    try {
+      const items = await getHistory();
+      setHistory(items);
+      
+      if (taskId) {
+        await selectReport(taskId, items);
+      }
+    } catch (error) {
+      console.error("更新新任务状态失败:", error);
     }
   }
 
@@ -1569,6 +1623,13 @@ export function App() {
                   isSubmitting={isSubmitting}
                   asyncEnabled={asyncEnabled}
                 />
+              </div>
+            </div>
+          ) : null}
+          {activeId && tokenUsage?.tasks?.[activeId] ? (
+            <div className="fixed bottom-6 left-6 md:left-[17.5rem] z-40 w-[240px] hidden sm:block pointer-events-none">
+              <div className="pointer-events-auto">
+                <TokenUsageCard data={tokenUsage.tasks[activeId]} />
               </div>
             </div>
           ) : null}

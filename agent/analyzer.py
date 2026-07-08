@@ -45,8 +45,9 @@ class Analyzer:
   "intent_mode": "BROAD_ANALYSIS 或是 DEEP_RESEARCH",
   "sandbox_evaluation": "针对本地工作区文件的评估，若无则为空",
   "entity_audit": {{
-    // 若为 BROAD_ANALYSIS，必须为空字典 {{}}！
+    // 若为 BROAD_ANALYSIS，必须为空字典 {{}}
     // 若为 DEEP_RESEARCH，输出 "实体名": "待检索 / 确认相关 / 确认无关"
+    // 注：实体名必须极度精简，仅保留核心名词或动作，禁止填入长句。
   }},
   "abandoned_file_ids": {{
     // 🗑️ 物理屏蔽资源字典。如果是有效文件请留空 {{}}
@@ -65,7 +66,7 @@ class Analyzer:
         
         try:
             resp = self.llm.client.chat.completions.create(
-                model=self.llm.model, messages=messages, temperature=0.1
+                model=self.llm.model, messages=messages
             ).choices[0].message.content
             
             match = re.search(r'\{.*\}', resp, re.DOTALL)

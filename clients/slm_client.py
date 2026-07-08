@@ -4,6 +4,7 @@ import requests
 import time
 from config import get_slm_endpoint, get_slm_password
 from utils.chunker import get_token_count
+from utils.token_tracker import global_token_tracker
 
 class SLMClient:
     def __init__(self, endpoint_override=None, password_override=None):
@@ -26,7 +27,18 @@ class SLMClient:
     def batch_generate(self, contents: list[str], tracker=None, task_id: str = None) -> list[str]:
         if not contents:
             return []
+            
+        # 1. 🚀 发送前：立即进行输入 Token 本地计算与计费拦截
+        total_in_tokens = sum(get_token_count(c) for c in contents)
+        global_token_tracker.add_slm(total_in_tokens, 0, task_id=task_id)
+
+        # 🚀 发起真实的网络请求
         results = self._batch_generate_direct(contents)
+        
+        # 2. 📥 得到回复后：统计实际成功生成的输出 Token 并追加计费
+        total_out_tokens = sum(get_token_count(r) for r in results)
+        global_token_tracker.add_slm(0, total_out_tokens, task_id=task_id)
+
         if tracker:
             for idx, text in enumerate(results):
                 tracker.track_slm(input_prompt=contents[idx], output_text=text, task_id=task_id)

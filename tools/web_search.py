@@ -8,12 +8,10 @@ from config import API_KEYS, SEARCH_CONFIG, DATA_PIPELINE, get_llm_provider, get
 from tools.registry import ToolRegistry
 from clients.slm_client import SLMClient
 from clients.llm_client import LLMClient
-from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_relevance_judgment_prompt, build_slm_reduce_prompt
+from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_reduce_prompt
 from utils.chunker import get_token_count, semantic_chunk_text
 
 slm_client = SLMClient()
-
-EMPTY_WEB_FACT_MARKERS = ("未找到", "无实质内容", "None", "无")
 
 def _clean_slm_web_output(output: str) -> str:
     if not output:
@@ -21,43 +19,14 @@ def _clean_slm_web_output(output: str) -> str:
     return output.split("</think>")[-1].strip() if "</think>" in output else output.strip()
 
 def _is_empty_web_fact(text: str) -> bool:
-    return not text or any(marker in text for marker in EMPTY_WEB_FACT_MARKERS)
-
-def _normalize_keyword_text(text: str) -> str:
-    return re.sub(r"\s+", "", str(text or "")).lower()
-
-def _extract_query_keywords(query: str) -> list:
-    normalized_query = _normalize_keyword_text(query)
-    keywords = []
-    if normalized_query:
-        keywords.append(normalized_query)
-
-    for token in re.findall(r"[A-Za-z0-9]+|[\u4e00-\u9fff]+", str(query or "").lower()):
-        if len(token) >= 2 and token not in keywords:
-            keywords.append(token)
-
-    return keywords
-
-def _raw_web_result_matches_query(result: dict, query: str) -> bool:
-    keywords = _extract_query_keywords(query)
-    if not keywords:
+    if not text:
         return True
-
-    raw_text = " ".join(str(result.get(key, "")) for key in ("title", "content", "url"))
-    normalized_raw_text = _normalize_keyword_text(raw_text)
-    return any(keyword in normalized_raw_text for keyword in keywords)
-
-def _filter_raw_web_results_by_query(results: list, query: str) -> tuple:
-    kept_results = []
-    dropped_results = []
-
-    for result in results:
-        if _raw_web_result_matches_query(result, query):
-            kept_results.append(result)
-        else:
-            dropped_results.append(result)
-
-    return kept_results, dropped_results
+    t = text.strip()
+    if t in ["无", "None", "none", "NONE", "未找到", "无实质内容", "不相关"]:
+        return True
+    if t.startswith("未找到与") or t.startswith("未找到相关"):
+        return True
+    return False
 
 def _assemble_web_search_facts(all_responses: list, prompt_metadata: list) -> tuple:
     sources = {}
@@ -102,12 +71,18 @@ def _assemble_web_search_facts(all_responses: list, prompt_metadata: list) -> tu
 
 def _generate_search_queries(query: str, active_goal: str) -> list:
     llm = LLMClient()
-    sys_prompt = "你是一个高级情报检索专家。请基于【核心实体】和【全局调查目标】，生成 3 个不同维度的搜索引擎查询短语（越精简越好，适合喂给谷歌/百度）。\n维度要求：1. 定义与背景； 2. 与调查目标的深度关联； 3. 最新新闻与动态。\n必须只输出 JSON 字符串数组格式，例如 [\"词1\", \"词2\", \"词3\"]。"
+    sys_prompt = (
+        "基于给定的核心实体和全局目标，生成 3 个用于网页搜索的极简短语。\n\n"
+        "约束：\n"
+        "1. 必须是直接的搜索词组（核心主体+事件/动作）。\n"
+        "2. 禁止使用“维度影响”、“分析报告”、“企业经营”等抽象书面词汇。\n\n"
+        "仅输出 JSON 字符串数组，例如：[\"词1\", \"词2\", \"词3\"]"
+    )
     
     try:
         resp = llm.chat_completion([
             {"role": "system", "content": sys_prompt}, 
-            {"role": "user", "content": f"核心实体: {query}\n全局调查目标: {active_goal}"}
+            {"role": "user", "content": f"核心实体: {query}\n全局目标: {active_goal}"}
         ]).content
         match = re.search(r'\[.*\]', resp, re.DOTALL)
         if match:
@@ -116,7 +91,7 @@ def _generate_search_queries(query: str, active_goal: str) -> list:
                 return [str(q)[:30] for q in q_list[:3]]
     except Exception:
         pass
-    return [f"{query} 是什么", f"{query} {active_goal[:8]} 关联", f"{query} 最新动态"]
+    return [f"{query}", f"{query} 影响", f"{query} 最新消息"]
 
 @ToolRegistry.register(
     name="execute_web_search",
@@ -217,25 +192,42 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
         
         if not unique_results: return f"[系统状态] 搜索实体 '{query}' 无有效结果返回。"
 
-        unique_results, dropped_raw_results = _filter_raw_web_results_by_query(unique_results, query)
-        if dropped_raw_results:
-            print(f"[Web Search]: 静态关键词检查已丢弃 {len(dropped_raw_results)} 个未命中 '{query}' 的原始网页结果。")
-        if not unique_results:
-            return f"[系统状态] 搜索实体 '{query}' 的结果均未通过原始网页关键词检查。"
-        
         prompts = []
         prompt_metadata = []
         max_chunk = DATA_PIPELINE.get("max_chunk_tokens", 800)
         overlap_ratio = DATA_PIPELINE.get("overlap_ratio", 0.05)
         
-        # 1. Map 提炼阶段
+        clean_parts = []
+        structured_web_facts = []
+        processed_refs = set()
+        short_pages_count = 0
+        
+        # 1. 预处理分离短文本与长文本
         for r in unique_results:
             title = r.get("title", "未命名网页").strip()
             web_ref_id = f"WEB_REF_TV_{uuid.uuid4().hex[:6]}"
-            chunks = semantic_chunk_text(r.get("content", "").strip(), max_tokens=max_chunk, overlap_ratio=overlap_ratio)
+            content = r.get("content", "").strip()
+            url = r.get("url", "")
+            
+            if not content: continue
+            
+            # 🟢 核心优化：如果 Token < 500，直接免压缩编入事实库
+            if get_token_count(content) < 500:
+                short_pages_count += 1
+                processed_refs.add(web_ref_id)
+                structured_web_facts.append({
+                    "ref_id": web_ref_id,
+                    "title": title,
+                    "url": url,
+                    "content": "短篇网页原生抓取 (免压缩直通)"
+                })
+                clean_parts.append(f"【网络情报 ^[{web_ref_id}]^ 】 {title}：\n{content}")
+                continue
+
+            # 超过 500 Token，按需切割并推入 Map 队列
+            chunks = semantic_chunk_text(content, max_tokens=max_chunk, overlap_ratio=overlap_ratio)
             for idx, chunk in enumerate(chunks):
                 chunk_with_title = f"【标题】: {title}\n【片段】: {chunk}"
-                # 🌟 Map 直接复用：传入标准 Map 提示词，focus 设为检索实体
                 map_prompt = build_slm_sequential_summary_prompt(
                     chunk_str=chunk_with_title,
                     current_idx=idx + 1,
@@ -244,68 +236,40 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
                     is_english=False
                 )
                 prompts.append(map_prompt)
-                prompt_metadata.append({"ref_id": web_ref_id, "title": title, "url": r.get("url", "")})
+                prompt_metadata.append({"ref_id": web_ref_id, "title": title, "url": url})
+                
+        if short_pages_count > 0:
+            print(f"[Web Search]: ⚡ 命中 {short_pages_count} 个短篇网页 (Token < 500)，已安全免压缩直通。")
             
-        print(f"[Web Search]: 🛡️ 启动 SLM 全文隔离 Map 提炼 (共 {len(prompts)} 个分块)...")
         mapped_responses = []
         task_id = agent_state.task_id if agent_state and getattr(agent_state, "task_id", "") else kwargs.get("task_id")
         slm_scheduler = kwargs.get("slm_scheduler")
         concurrency_limit = get_slm_concurrency()
-        for i in range(0, len(prompts), concurrency_limit):
-            prompt_batch = prompts[i:i+concurrency_limit]
-            if slm_scheduler:
-                mapped_responses.extend(slm_scheduler.submit(prompt_batch, tracker=tracker, task_id=task_id))
-            else:
-                mapped_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
+        
+        # 2. 长文本 Map 阶段
+        if prompts:
+            print(f"[Web Search]: 🛡️ 启动 SLM 全文关联提炼 (共 {len(prompts)} 个分块)...")
+            for i in range(0, len(prompts), concurrency_limit):
+                prompt_batch = prompts[i:i+concurrency_limit]
+                if slm_scheduler:
+                    mapped_responses.extend(slm_scheduler.submit(prompt_batch, tracker=tracker, task_id=task_id))
+                else:
+                    mapped_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
             
-        # 2. 相关性分析判定阶段
-        judge_prompts = []
-        judge_metadata = []
+        retained_facts = []
         for idx, out in enumerate(mapped_responses):
             if idx >= len(prompt_metadata): break
             clean_out = _clean_slm_web_output(out)
             if _is_empty_web_fact(clean_out): continue
-            
-            # 🌟 极简自然语言提示词：“判断这段文字是否和目标实体{}相关”
-            judge_prompt = build_slm_relevance_judgment_prompt(clean_out, query)
-            judge_prompts.append(judge_prompt)
-            judge_metadata.append({
-                "meta": prompt_metadata[idx],
-                "mapped_text": clean_out
+            meta = prompt_metadata[idx]
+            retained_facts.append({
+                "ref_id": meta["ref_id"],
+                "title": meta["title"],
+                "url": meta["url"],
+                "fact": clean_out
             })
-            
-        judged_responses = []
-        if judge_prompts:
-            print(f"[Web Search]: 🛡️ 启动 SLM 相关性分析判定 (共 {len(judge_prompts)} 个分块)...")
-            for i in range(0, len(judge_prompts), concurrency_limit):
-                prompt_batch = judge_prompts[i:i+concurrency_limit]
-                if slm_scheduler:
-                    judged_responses.extend(slm_scheduler.submit(prompt_batch, tracker=tracker, task_id=task_id))
-                else:
-                    judged_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
-                    
-        # 3. 过滤出确实相关的客观事实
-        retained_facts = []
-        for idx, out in enumerate(judged_responses):
-            clean_judge = _clean_slm_web_output(out)
-            lower_judge = clean_judge.lower()
-            
-            # 🌟 仅判断是否相关，其余任务一概不涉及
-            is_related = True
-            if any(kw in lower_judge for kw in ["不相关", "无关", "没有关系", "不符合", "not related", "unrelated", "no relationship"]):
-                is_related = False
-                
-            if is_related:
-                item = judge_metadata[idx]
-                meta = item["meta"]
-                retained_facts.append({
-                    "ref_id": meta["ref_id"],
-                    "title": meta["title"],
-                    "url": meta["url"],
-                    "fact": item["mapped_text"]
-                })
 
-        # 4. Reduce 阶段组装
+        # 3. 长文本 Reduce 阶段
         reduce_tasks = []
         reduce_metadata = []
         sources_map = {}
@@ -342,14 +306,18 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
                 else:
                     all_reduce_responses.extend(slm_client.batch_generate(prompt_batch, tracker=tracker, task_id=task_id))
 
-        clean_parts, structured_web_facts, processed_refs = _assemble_web_search_facts(all_reduce_responses, reduce_metadata)
+        # 4. 把经过提炼的长文本和原本直通的短文本混合拼接
+        clean_parts_r, structured_web_facts_r, processed_refs_r = _assemble_web_search_facts(all_reduce_responses, reduce_metadata)
+        clean_parts.extend(clean_parts_r)
+        structured_web_facts.extend(structured_web_facts_r)
+        processed_refs.update(processed_refs_r)
 
         status_str = "确认相关 (已完成提炼)"
             
         if not clean_parts: return "[系统状态] 未能从有效网页中提取到客观事实。"
             
         if working_memory is not None:
-            working_memory[f"WebFact_{safe_query}"] = "\n".join(clean_parts)
+            working_memory[f"WebFact_{safe_query}"] = "\n\n".join(clean_parts)
             working_memory["__web_structured_facts__"].extend(structured_web_facts)
             if agent_state:
                 agent_state.memory_catalog[f"WebFact_{safe_query}"] = f"状态: 已绑定 {len(processed_refs)} 个网页源，严禁再次提取"
