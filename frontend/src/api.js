@@ -17,20 +17,43 @@ export async function apiFetch(path, options) {
   return data;
 }
 
+// RWKV-ECRA/frontend/src/api.js
+
 export async function getHistory() {
   const payload = await apiFetch("/frontend-api/history");
   const items = payload.data || [];
   
-  return items.map(item => ({
-    id: item.task_id || item.id,
-    title: item.title || item.task_id || item.id,
-    query: item.query || "",
-    status: item.status || "ready",
-    progress: item.progress || "",
-    updated_at: item.timestamp || item.updated_at || "-",
-    queued_at: item.queued_at || "",  // ✨ 这里就是映射过来的排队时间
-    path: item.result_dir || item.path || ""
-  }));
+  return items.map(item => {
+    // ✨ 核心修复：遍历后端的扁平字典，把所有 step_x 捞出来组装成有序数组
+    const stepsMap = [];
+    for (const key in item) {
+      if (key.startsWith("step_")) {
+        const idx = parseInt(key.slice(5), 10);
+        if (!isNaN(idx)) {
+          stepsMap.push({ index: idx, value: item[key] });
+        }
+      }
+    }
+    
+    // 按索引排序保证执行顺序
+    stepsMap.sort((a, b) => a.index - b.index);
+    // 提取成纯字符串数组
+    const stepsArray = item.steps?.length ? item.steps : stepsMap.map(s => s.value);
+
+    return {
+      id: item.task_id || item.id,
+      title: item.title || item.task_id || item.id,
+      query: item.query || "",
+      status: item.status || "ready",
+      progress: item.progress || "",
+      steps: stepsArray, // 将还原后的完整数组交给组件
+      updated_at: item.timestamp || item.updated_at || "-",
+      queued_at: item.queued_at || "", 
+      start_time: item.start_time || "", // ✨ 映射开始时间给组件使用
+      end_time: item.end_time || "",     // ✨ 映射结束时间给组件使用
+      path: item.result_dir || item.path || ""
+    };
+  });
 }
 
 export async function getReport(id) {
@@ -88,9 +111,6 @@ export async function deleteTask(id) {
   });
 }
 
-// ===================================
-// 文件管理系列接口
-// ===================================
 export async function getFiles() {
   const payload = await apiFetch("/frontend-api/files");
   return payload.data || [];

@@ -14,6 +14,8 @@ from utils.chunker import get_token_count, semantic_chunk_text
 from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_reduce_prompt
 from workflows.map_reduce_flow import llm_plan_execute_check_compression, clean_slm_output, _sequential_assemble
 import contextvars
+from utils.token_tracker import current_task_id
+from utils.task_manager import update_task_progress
 
 def parse_md_blocks(md_text: str) -> Dict[str, str]:
     blocks = {}
@@ -77,6 +79,9 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
     llm = LLMClient()
     print("启动汇聚分析流程 (强绑定隔离溯源模式)...")
     
+    # 获取任务ID供前端推送使用
+    tid = kwargs.get("task_id") or (agent_state.task_id if agent_state and getattr(agent_state, "task_id", "") else current_task_id.get())
+    
     source_registry = {}
     static_sources = [] 
     
@@ -124,7 +129,9 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
     if total_tokens > token_limit:
         print(f"\n[容量超限] 聚合素材池总字数 ({total_tokens} Tokens) 超出极限。")
         print("正在触发全局降维 (直接复用第一次的 map_reduce_flow.py 进行二次提炼并重新绑定)...")
-        
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, f"🗜️ [研报生成] 聚合池容量超限({total_tokens} Tokens)，正在触发全局二次降维压缩...")
+            
         asset_paths = []
         origin_fids = []
         
@@ -167,7 +174,9 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 
         if total_tokens > token_limit:
             print(f"\n[极限超载] 经过二次 MAP/REDUCE 提炼后体积仍然超限 ({total_tokens} Tokens)！启动大类/小类分批打包与 LLM 局部小报告生成机制...")
-            
+            if tid and tid != "UNKNOWN_TASK":
+                update_task_progress(tid, "📦 [研报生成] 容量仍然超限，正在启动大模型分批打包与局部小报告生成机制...")
+                
             report_jobs = []
             main_cat_groups = {}
             web_sources = []
@@ -344,6 +353,10 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
     # 4. AST 骨架生成与并发批处理渲染
     # ==========================================
     try:
+        # ✅ 推送 AST 生成状态
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, "📝 [研报生成 1/3] 大模型正在根据所有素材提炼全局报告骨架(AST大纲)...")
+            
         print(">> 1/3 正在生成报告骨架树(AST)...")
         outline_sys_prompt = """任务：基于输入目标和素材，生成一份逻辑紧凑的报告大纲。
 
@@ -372,9 +385,12 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             ast_skeleton_lines.append(f"{i+1}. [节点: {n.get('node_id')}] {n.get('title')}")
         global_ast_skeleton_str = "\n".join(ast_skeleton_lines)
         
+        # ✅ 推送正文并发撰写状态
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, f"✍️ [研报生成 2/3] 大纲生成完毕(共{len(nodes)}节)。大模型正在并发撰写各章节正文...")
+            
         print(f">> 2/3 正在并发与分批生成报告正文 (共 {len(nodes)} 个节点) ...")
         
-        # 🔴 提示词优化：彻底去除了对具体角标格式的举例，防止引导它自己脑补角标
         writer_sys_prompt = """任务：根据大纲撰写指定节点的正文。
 
 规范：
@@ -441,7 +457,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         import contextvars
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_batch = {}
-            # ✨ 修改：在循环内部，为每个子任务单独拷贝上下文
             for b in batches:
                 ctx = contextvars.copy_context()
                 future_to_batch[executor.submit(ctx.run, generate_node_batch, b)] = b
@@ -455,6 +470,10 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                 except Exception as e:
                     print(f"   批次失败: {e}")
 
+        # ✅ 推送排版溯源状态
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, "✨ [研报生成 3/3] 正文生成完毕！正在进行深度排版美化与溯源角标对齐...")
+            
         # ==========================================
         # 5. 串行映射角标（保证编号按顺序）
         # ==========================================
@@ -478,8 +497,6 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             
             def map_and_replace_citation(match, is_web):
                 ref_id = match.group(1)
-                
-                # 🔴 强制防幻觉拦截：如果在资产库里找不到该引用，直接将其清洗掉（返回空字符串）
                 if ref_id not in source_registry:
                     return "" 
                     

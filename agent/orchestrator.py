@@ -9,7 +9,6 @@ from collections import deque
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, Set
-
 from agent.analyzer import Analyzer
 from agent.planner import Planner
 from utils.tracker import EventTracker
@@ -17,7 +16,6 @@ from clients.slm_client import SLMClient
 from config import TRACKING, DATA_PIPELINE, get_slm_async_batch_wait_ms, get_slm_async_enabled, get_slm_async_parallelism, get_slm_concurrency
 from tools.registry import ToolRegistry
 from utils.chunker import get_token_count
-from utils.token_tracker import global_token_tracker
 from utils.task_manager import is_task_stopped, update_task_progress
 from workflows.report_flow import generate_final_aggregate_reports
 import tools.static_ops 
@@ -132,27 +130,42 @@ class SLMInputScheduler:
             return batch
 
     def _process_batch(self, batch):
+        from utils.chunker import get_token_count
+        from utils.token_tracker import global_token_tracker
+        from utils.task_manager import update_task_progress
+        
         try:
-            print(f"[SLM 输入队列] 发射 {len(batch)} 个片段 | 首任务: {batch[0].task_id}")
+            tid = batch[0].task_id
+            msg = f"⚙️ [端侧并发队列] 实际分配调度 {len(batch)} 个切片片段..."
+            print(f"[SLM 输入队列] 发射 {len(batch)} 个片段 | 首任务: {tid}")
             
-            # 1. 🚀 发送前计费：统计批次中每个片段的 Input Token
+            if tid and tid != "UNKNOWN_TASK":
+                update_task_progress(tid, msg)
+            
+            # 1. 🚀 提前切分计算 Input Token
             for item in batch:
                 in_toks = get_token_count(item.content)
                 global_token_tracker.add_slm(in_toks, 0, task_id=item.task_id)
 
-            # 调用 direct 底层方法绕开默认的总额计费，避免重复
             client = SLMClient(endpoint_override=batch[0].endpoint, password_override=batch[0].password)
-            results = client._batch_generate_direct([item.content for item in batch])
             
+            # 2. ✨ 开始并发计时器
+            global_token_tracker.start_timer("slm", tid)
+            try:
+                results = client._batch_generate_direct([item.content for item in batch], task_id=tid)
+            finally:
+                # 3. ✨ 绝对闭环终止计时器
+                global_token_tracker.stop_timer("slm", tid)
+            
+            # 4. 📥 解析 Output Token 追加入账
             for item, result in zip(batch, results):
                 item.result = result
-                
-                # 2. 📥 返回后计费：统计真实生成的 Output Token
                 out_toks = get_token_count(result)
                 global_token_tracker.add_slm(0, out_toks, task_id=item.task_id)
 
                 if item.tracker:
                     item.tracker.track_slm(input_prompt=item.content, output_text=result, task_id=item.task_id)
+                    
         except Exception as exc:
             for item in batch:
                 item.error = exc
@@ -314,10 +327,9 @@ class Orchestrator:
             "none": "思考下一步方向"
         }
 
-        progress_log = []
+        # ✨ 改为状态栏单行覆盖模式，移除累加数组
         def push_progress(msg: str):
-            progress_log.append(msg)
-            update_task_progress(self.state.task_id, "\n".join(progress_log))
+            update_task_progress(self.state.task_id, msg)
 
         push_progress("🚀 正在初始化环境，构建工作区内存与检索本地文件...")
 
@@ -349,7 +361,7 @@ class Orchestrator:
             context_text = self.state.to_markdown_context()
 
             try:
-                push_progress(f"[思考步数 {step_count}] 正在分析环境状态与任务缺口...")
+                push_progress(f"[思考步数 {step_count}] 查看当前资源，分析还需要做什么...")
 
                 analysis = self.analyzer.analyze_intent_and_phase(user_query, context_text)
                 phase = analysis.get("next_phase", "DISCOVERY")
@@ -383,7 +395,8 @@ class Orchestrator:
                 print(f"🎯 缺口提取: {missing_info}")
                 print(f"📍 当前阶段: {phase}")
                 print("="*50)
-                
+
+                push_progress(f"[思考步数 {step_count}] 想好了，找一下合适的工具...")
                 plan = self.planner.plan_next_action(user_query, analysis, context_text, phase)
                 action, args = plan["action"], plan["args"]
 
@@ -443,7 +456,7 @@ class Orchestrator:
                 friendly_phase = PHASE_MAP.get(phase, phase)
                 friendly_action = ACTION_MAP.get(action, action)
                 
-                push_progress(f"  ├─ 阶段: {friendly_phase}\n  ├─ 缺口: {missing_info}\n  └─ 动作: 调度工具 [{friendly_action}]")
+                push_progress(f"当前阶段: {friendly_phase} ➜ 动作: {friendly_action}")
                 
                 self.tracker.track("Routing", input_data=phase, output_data=plan)
 
@@ -482,7 +495,7 @@ class Orchestrator:
                 result = ToolRegistry.execute(action, args=args, context=env_context)
                 self.state.last_feedback = f"上一步 [{action}] 执行结果:\n{result}"
 
-                push_progress(f"✅ [执行完成] 工具返回结果，整理进入下一轮...\n")
+                push_progress(f"[{action}] 执行完毕，整理进入下一轮分析...")
 
                 with open(trace_file, "a", encoding="utf-8") as f:
                     f.write(f"### 3. 工具执行结果\n\n```text\n{result}\n```\n\n---\n\n")

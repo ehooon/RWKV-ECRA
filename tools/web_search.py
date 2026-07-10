@@ -10,6 +10,8 @@ from clients.slm_client import SLMClient
 from clients.llm_client import LLMClient
 from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_reduce_prompt
 from utils.chunker import get_token_count, semantic_chunk_text
+from utils.token_tracker import current_task_id
+from utils.task_manager import update_task_progress
 
 slm_client = SLMClient()
 
@@ -70,6 +72,13 @@ def _assemble_web_search_facts(all_responses: list, prompt_metadata: list) -> tu
     return clean_parts, structured_web_facts, processed_refs
 
 def _generate_search_queries(query: str, active_goal: str) -> list:
+    try:
+        tid = current_task_id.get()
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, f"🌐 [联网检索] 正在利用大模型生成针对 '{query}' 的多维搜索关键词...")
+    except Exception:
+        pass  # 就算日志推送失败，也绝对不能阻塞后续的网络搜索
+        
     llm = LLMClient()
     sys_prompt = (
         "基于给定的核心实体和全局目标，生成 3 个用于网页搜索的极简短语。\n\n"
@@ -105,12 +114,17 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
     safe_query = re.sub(r'\W+', '_', query)[:20]
     
     active_goal = agent_state.refined_query if (agent_state and hasattr(agent_state, 'refined_query') and agent_state.refined_query) else kwargs.get("original_goal", "当前主线任务")
+    tid = (agent_state.task_id if agent_state and hasattr(agent_state, 'task_id') else kwargs.get("task_id")) or current_task_id.get()
 
     if working_memory is not None and "__web_structured_facts__" not in working_memory:
         working_memory["__web_structured_facts__"] = []
 
     if provider == "baidu":
         print(f"[Web Search]: 🚀 启动文心原生关联检索 -> 实体: '{query}' ...")
+        # ✅ 推送文心原生搜索执行状态
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, f"🔍 [联网检索] 正在调用【文心原生搜索引擎】进行深度检索与知识溯源: '{query}' ...")
+            
         llm = LLMClient()
         prompt_msg = [
             {"role": "system", "content": "执行深度联网检索。基于原生搜索结果提取与用户目标相关的客观事实，保留可溯源信息。"},
@@ -173,6 +187,10 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
             except: return []
 
         print(f"[Web Search]: 🚀 正在向 Tavily 并发发射检索探针 (深度:{s_depth}, 最大结果:{s_max_res})...")
+        # ✅ 推送 Tavily 搜索引擎抓取状态
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, f"🔍 [联网检索] 正在调用【Tavily 搜索引擎】并发抓取多源网络事实 (深度: {s_depth}) ...")
+            
         all_raw_results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
             futures = []
@@ -249,6 +267,10 @@ def execute_web_search(query: str, working_memory: dict = None, tracker=None, ag
         # 2. 长文本 Map 阶段
         if prompts:
             print(f"[Web Search]: 🛡️ 启动 SLM 全文关联提炼 (共 {len(prompts)} 个分块)...")
+            # ✅ 推送网页抓取内容提取状态
+            if tid and tid != "UNKNOWN_TASK":
+                update_task_progress(tid, f"🛡️ [联网检索] 抓取到长篇网页，正在下发 {len(prompts)} 个切片让小模型进行关联提炼...")
+                
             for i in range(0, len(prompts), concurrency_limit):
                 prompt_batch = prompts[i:i+concurrency_limit]
                 if slm_scheduler:

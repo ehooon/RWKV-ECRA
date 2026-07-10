@@ -24,7 +24,8 @@ class TaskStore:
                 if not line: continue
                 try:
                     record = json.loads(line)
-                    tid = record.get("task_id")
+                    # 兼容老数据，优先取 id，没有的话取 task_id
+                    tid = record.get("id") or record.get("task_id")
                     if tid:
                         if tid not in self._task_index:
                             self._ordered_keys.append(tid)
@@ -63,7 +64,6 @@ class TaskStore:
                 has_valid_file = False
                 target_file = None
                 
-                # 递归遍历找文件 (免疫特殊字符路径)
                 for root_dir, _, files in os.walk(item_path):
                     for f in files:
                         if f.endswith(".jsonl") or f.endswith(".md"):
@@ -80,9 +80,13 @@ class TaskStore:
                         time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         
                     self._ordered_keys.append(item)
+                    # ✅ 采用全新的字典结构
                     self._task_index[item] = {
-                        "task_id": item,
-                        "timestamp": time_str,
+                        "id": item,
+                        "task_id": item, # 保留用于向前兼容旧前端
+                        "start_time": time_str,
+                        "end_time": time_str,
+                        "timestamp": time_str, # 保留用于前端排序兼容
                         "query": item, 
                         "status": "completed",
                         "result_dir": item_path,
@@ -92,7 +96,7 @@ class TaskStore:
                     changed = True
                     
             if changed:
-                self._ordered_keys.sort(key=lambda k: self._task_index[k].get("timestamp", ""))
+                self._ordered_keys.sort(key=lambda k: self._task_index[k].get("start_time") or self._task_index[k].get("timestamp", ""))
                 os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
                 with open(self.filepath, "w", encoding="utf-8") as f:
                     for k in self._ordered_keys:
@@ -101,23 +105,34 @@ class TaskStore:
     def record_task(self, task_id: str, query: str, status: str, result_dir: str = "", error: str = "", queued_at: str = None):
         with self._lock:
             os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
-            record = {
-                "task_id": task_id,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "query": query,
-                "status": status,
-                "result_dir": result_dir,
-                "error": error
-            }
-            if queued_at: record["queued_at"] = queued_at
-                
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
             if task_id not in self._task_index:
                 self._ordered_keys.append(task_id)
+                record = {
+                    "id": task_id,
+                    "task_id": task_id,
+                    "start_time": now_str,
+                    "end_time": "",
+                    "timestamp": now_str,
+                    "query": query,
+                    "status": status,
+                    "result_dir": result_dir,
+                    "error": error
+                }
+                if queued_at: record["queued_at"] = queued_at
                 self._task_index[task_id] = record
             else:
-                if "queued_at" not in record and "queued_at" in self._task_index[task_id]:
-                    record["queued_at"] = self._task_index[task_id]["queued_at"]
-                self._task_index[task_id].update(record)
+                record = self._task_index[task_id]
+                if "queued_at" not in record and queued_at:
+                    record["queued_at"] = queued_at
+                record["status"] = status
+                if result_dir: record["result_dir"] = result_dir
+                record["error"] = error
+                
+                # ✅ 拦截任务结束状态，打上 end_time
+                if status in ["completed", "failed", "stopped"]:
+                    record["end_time"] = now_str
             
             with open(self.filepath, "a", encoding="utf-8") as f:
                 f.write(json.dumps(self._task_index[task_id], ensure_ascii=False) + "\n")
@@ -125,25 +140,48 @@ class TaskStore:
     def update_task_progress(self, task_id: str, progress: str):
         with self._lock:
             if task_id in self._task_index:
-                self._task_index[task_id]['progress'] = progress
+                record = self._task_index[task_id]
+                
+                # 1. 更新内存中的全量状态
+                record['progress'] = progress
+                step_count = sum(1 for k in record.keys() if k.startswith("step_"))
+                
+                time_prefix = datetime.now().strftime("[%H:%M:%S] ")
+                step_key = f"step_{step_count}"
+                step_val = f"{time_prefix}{progress}"
+                record[step_key] = step_val
+                
+                # 2. ✨ 核心修复：构造 Delta 字典，磁盘只追加这 4 个字段
+                delta_record = {
+                    "id": task_id,
+                    "task_id": task_id,  # 双重保险，兼容前端
+                    "progress": progress,
+                    step_key: step_val
+                }
+                
+                # 3. 写入增量字典，不再写入庞大的 record 字典
                 with open(self.filepath, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(self._task_index[task_id], ensure_ascii=False) + "\n")
+                    f.write(json.dumps(delta_record, ensure_ascii=False) + "\n")
 
     def request_stop(self, task_id: str):
         with self._lock:
             if task_id in self._task_index and self._task_index[task_id]['status'] == 'running':
-                self._task_index[task_id]['status'] = 'stopped'
+                record = self._task_index[task_id]
+                record['status'] = 'stopped'
+                record['end_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 with open(self.filepath, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(self._task_index[task_id], ensure_ascii=False) + "\n")
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def delete_task(self, task_id: str):
         with self._lock:
             if task_id in self._task_index:
-                self._task_index[task_id]['status'] = 'deleted'
+                record = self._task_index[task_id]
+                record['status'] = 'deleted'
+                record['end_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 with open(self.filepath, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(self._task_index[task_id], ensure_ascii=False) + "\n")
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 
-                task_dir = self._task_index[task_id].get("result_dir")
+                task_dir = record.get("result_dir")
                 if task_dir and os.path.exists(task_dir):
                     import shutil
                     try: shutil.rmtree(task_dir)

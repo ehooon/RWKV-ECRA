@@ -1,5 +1,7 @@
 # RWKV-ECRA/tools/registry.py
 from typing import Callable, Dict, Any
+from utils.token_tracker import current_task_id
+from utils.task_manager import update_task_progress
 
 class ToolRegistry:
     _tools: Dict[str, Dict[str, Any]] = {}
@@ -28,6 +30,11 @@ class ToolRegistry:
     def execute(cls, action: str, args: Dict[str, Any], context: Dict[str, Any]) -> str:
         if action not in cls._tools:
             return f"错误: 工具库中未注册 '{action}'。"
+        
+        # ✨ 工具状态拦截探针：自动将任何工具的调用动作推送至前端状态栏
+        tid = context.get("task_id") or current_task_id.get()
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, f"[工具调度] 正在使用工具: {action} ...")
         
         merged_kwargs = {**context, **args}
         return cls._tools[action]["func"](**merged_kwargs)

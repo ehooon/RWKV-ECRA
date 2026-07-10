@@ -248,43 +248,70 @@ def verify_keyword_in_file(file_ids: list = None, keywords: list = None, agent_s
         return "[系统状态] 执行失败：未提供需验证的关键词列表(keywords)。"
 
     import os
-    import re
+    import concurrent.futures
     from utils.file_reader import read_local_file
     
     results = []
     global_found_kws = set()
     
-    for fid in file_ids:
+    # 提前统一小写化搜索词，避免循环中重复转换
+    lower_kws = [(kw, str(kw).lower()) for kw in keywords]
+    
+    def _process_single_file(fid):
         if agent_state and hasattr(agent_state, 'id_to_path') and fid in agent_state.id_to_path:
             path = agent_state.id_to_path[fid]
         else:
-            results.append(f"📄 【{fid}】 验证跳过: ID无效或该文件已被物理屏蔽。")
-            continue
+            return (fid, None, f"📄 【{fid}】 验证跳过: ID无效或已被屏蔽。", set())
             
         fname = os.path.basename(path)
         try:
+            # 瞬间读入内存
             text = read_local_file(path)
-            file_res = [f"📄 【{fname}】 验真结果:"]
+            # ⚡ 核心优化：一次性将全文转为小写，后续用高度优化的 C 底层方法暴力扫
+            lower_text = text.lower()
             
-            for kw in keywords:
-                safe_kw = re.escape(str(kw))
-                matches = list(re.finditer(safe_kw, text, re.IGNORECASE))
-                count = len(matches)
+            file_res = [f"📄 【{fname}】 验真结果:"]
+            local_found = set()
+            
+            for kw, l_kw in lower_kws:
+                # ⚡ 极其底层的 C 语言级别统计，比正则快几十倍
+                count = lower_text.count(l_kw)
                 
                 if count == 0:
                     file_res.append(f"  - 关键词 '{kw}': 出现 0 次")
                 else:
-                    global_found_kws.add(str(kw)) 
-                    first_m = matches[0]
-                    start = max(0, first_m.start() - 30)
-                    end = min(len(text), first_m.end() + 30)
+                    local_found.add(str(kw))
+                    # 找到第一次出现的位置，提取上下文
+                    first_idx = lower_text.find(l_kw)
+                    start = max(0, first_idx - 30)
+                    end = min(len(text), first_idx + len(kw) + 30)
                     context_snippet = text[start:end].replace('\n', ' ')
+                    
                     file_res.append(f"  - 关键词 '{kw}': 出现 {count} 次。片段: \"...{context_snippet}...\"")
             
-            results.append("\n".join(file_res))
+            return (fid, fname, "\n".join(file_res), local_found)
             
         except Exception as e:
-            results.append(f"📄 【{fname}】 验证读取失败: {str(e)}")
+            return (fid, fname, f"📄 【{fname}】 验证读取失败: {str(e)}", set())
+
+    # 虽然字符串匹配极快，但保留多线程并发读盘，应对未来挂载机械硬盘(HDD)或网络路径(NAS)的场景
+    max_workers = min(len(file_ids), 32)
+    res_dict = {}
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_fid = {executor.submit(_process_single_file, fid): fid for fid in file_ids}
+        for future in concurrent.futures.as_completed(future_to_fid):
+            fid = future_to_fid[future]
+            try:
+                f_id, fname, res_text, found_kws = future.result()
+                res_dict[f_id] = res_text
+                global_found_kws.update(found_kws)
+            except Exception as e:
+                res_dict[fid] = f"📄 【{fid}】 执行异常: {str(e)}"
+
+    for fid in file_ids:
+        if fid in res_dict:
+            results.append(res_dict[fid])
 
     if agent_state and hasattr(agent_state, 'entity_audit') and agent_state.entity_audit:
         for kw in keywords:

@@ -5,6 +5,7 @@ import time
 from config import get_slm_endpoint, get_slm_password
 from utils.chunker import get_token_count
 from utils.token_tracker import global_token_tracker
+from utils.task_manager import update_task_progress
 
 class SLMClient:
     def __init__(self, endpoint_override=None, password_override=None):
@@ -28,14 +29,18 @@ class SLMClient:
         if not contents:
             return []
             
-        # 1. 🚀 发送前：立即进行输入 Token 本地计算与计费拦截
+        # 🚀 发送前：立即进行输入 Token 本地计算与计费拦截
         total_in_tokens = sum(get_token_count(c) for c in contents)
         global_token_tracker.add_slm(total_in_tokens, 0, task_id=task_id)
 
-        # 🚀 发起真实的网络请求
-        results = self._batch_generate_direct(contents)
+        # ✨ 在发送指令前启动计时器，确保绝对闭环截断
+        global_token_tracker.start_timer("slm", task_id)
+        try:
+            results = self._batch_generate_direct(contents, task_id=task_id)
+        finally:
+            global_token_tracker.stop_timer("slm", task_id)
         
-        # 2. 📥 得到回复后：统计实际成功生成的输出 Token 并追加计费
+        # 📥 得到回复后：统计实际成功生成的输出 Token 并追加计费
         total_out_tokens = sum(get_token_count(r) for r in results)
         global_token_tracker.add_slm(0, total_out_tokens, task_id=task_id)
 
@@ -44,7 +49,7 @@ class SLMClient:
                 tracker.track_slm(input_prompt=contents[idx], output_text=text, task_id=task_id)
         return results
 
-    def _batch_generate_direct(self, contents: list[str]) -> list[str]:
+    def _batch_generate_direct(self, contents: list[str], task_id: str = None) -> list[str]:
         payload = {
             "contents": contents,
             "max_tokens": 2400,       
@@ -59,9 +64,7 @@ class SLMClient:
         }
 
         # 1. 动态超时计算
-        # 基础通信保障时间
         BASE_TIMEOUT_SECONDS = 60.0  
-        # 每1000个Token额外增加的等待预留时间（覆盖缓慢的 prefill 阶段）
         PER_1K_TOKENS_TIMEOUT_SECONDS = 45.0 
         
         total_tokens = sum(get_token_count(c) for c in contents)
@@ -72,7 +75,12 @@ class SLMClient:
         
         for attempt in range(max_retries):
             try:
-                print(f"🚀 [SLM Client] 发射批次 (大小: {len(contents)}, 总计: {total_tokens} Tokens)。动态超时设置为 {dynamic_timeout:.1f} 秒。")
+                # 📢 日志与状态栏同步推进
+                msg = f"🚀 [端侧模型] 物理发射批次 (大小: {len(contents)}, 总计: {total_tokens} Tokens)。动态超时: {dynamic_timeout:.1f} 秒。"
+                print(msg)
+                if task_id and task_id != "UNKNOWN_TASK":
+                    update_task_progress(task_id, msg)
+                    
                 response = requests.post(self.endpoint, json=payload, headers=self.headers, stream=True, timeout=dynamic_timeout)
                 if response.status_code != 200:
                     raise RuntimeError(f"HTTP {response.status_code} - {response.content.decode('utf-8', errors='ignore')}")
@@ -122,7 +130,6 @@ class SLMClient:
                 return final_responses
                 
             except requests.exceptions.RequestException as e:
-                # 2. 优化重试日志，指示具体重试次数
                 print(f"⚠️ [SLM Client] 批次 (大小: {len(contents)}) 传输超时或网络异常，触发重试 ({attempt + 1}/{max_retries})... 异常: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)

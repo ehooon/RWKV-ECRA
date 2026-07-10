@@ -11,9 +11,11 @@ from utils.checkpoint import get_checkpoint, save_checkpoint
 from utils.retry import retry_with_fallback
 from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_reduce_prompt
 from tools.registry import ToolRegistry
-from utils.task_manager import is_task_stopped
+from utils.task_manager import is_task_stopped, update_task_progress
 from utils.asset_manager import get_asset, bind_asset
 import concurrent.futures
+import contextvars
+from utils.token_tracker import current_task_id
 
 slm_client = SLMClient()
 
@@ -30,9 +32,6 @@ def clean_slm_output(text: str) -> str:
     clean_str = clean_str.replace("</think>", "").strip()
     if "<think>" in clean_str:
         clean_str = clean_str.split("<think>")[0].strip()
-        
-    if "\n\n" in clean_str:
-        clean_str = clean_str.split("\n\n")[0].strip()
         
     for marker in ["User:", "Assistant:", "Q:", "A:", "Question:"]:
         if marker in clean_str:
@@ -64,7 +63,7 @@ def clean_slm_output(text: str) -> str:
                     
                     if match_all:
                         valid_lines = valid_lines[:-p*(repeats-1)]
-                        valid_lines.append("...[检测到模型陷入周期性复读，后续冗余已被彻底截断]...")
+                        valid_lines.append("...[系统物理防浪涌：检测到模型陷入周期性复读，后续冗余已被彻底截断]...")
                         is_repeating = True
                         break
                         
@@ -88,6 +87,12 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
         return text 
         
     print(f"\n🚨 Token 超阈值 ({current_tokens})，启动大模型(LLM)极限降维压缩...")
+    
+    # ✅ 推送极限压缩触发状态
+    tid = current_task_id.get()
+    if tid and tid != "UNKNOWN_TASK":
+        update_task_progress(tid, f"🗜️ [极限压缩] 数据域超载({current_tokens} Tokens)，正在让云端大模型制定极限降维策略...")
+        
     llm = LLMClient()
     current_text = text
     iteration = 1
@@ -117,6 +122,10 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
         llm_concurrency = get_llm_concurrency()
         print(f"   -> 🚀 文本已切割为 {len(chunks)} 个碎片，启动滚动并发提炼 (限制并发: {llm_concurrency})...")
         
+        # ✅ 推送并发压缩执行状态
+        if tid and tid != "UNKNOWN_TASK":
+            update_task_progress(tid, f"⚙️ [极限压缩] 策略已定，正在并发执行第 {iteration} 轮大模型文本降维抽提...")
+            
         compressed_pieces = [None] * len(chunks)
         
         def _compress_single_chunk(idx, chunk_data):
@@ -131,15 +140,13 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
                 return idx, False, str(e)
 
         max_workers = min(len(chunks), llm_concurrency)
-        
         import contextvars
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
-
             for i, c in enumerate(chunks):
                 ctx = contextvars.copy_context()
                 futures.append(executor.submit(ctx.run, _compress_single_chunk, i, c))
-            
+                
             for f in concurrent.futures.as_completed(futures):
                 idx, success, res = f.result()
                 if success:
@@ -148,6 +155,8 @@ def llm_plan_execute_check_compression(text: str, original_file_tokens: int = No
                 else:
                     compressed_pieces[idx] = ""
                     print(f"      ❌ 区块 {idx+1}/{len(chunks)} 压缩失败: {res}")
+            
+        current_text = "\n\n".join([p for p in compressed_pieces if p])
         
         new_tokens = get_token_count(current_text)
         new_ratio_str = f"(留存: {(new_tokens/original_file_tokens)*100:.1f}%)" if original_file_tokens else ""
@@ -174,10 +183,7 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
     reduce_group_size = cfg.get("reduce_group_size", 4) 
     llm_safe_window = cfg.get("llm_safe_window_tokens", 60000)
     
-    # 强制控制为 1 轮 REDUCE
     slm_reduce_steps_limit = 1
-    
-    # 判定是否为二次提炼的临时跑数
     is_temporary = kwargs.get("is_temporary", False)
     
     debug_dir = cfg.get("debug_directory", "./data/debug_slm")
@@ -192,7 +198,6 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
         if task_id and is_task_stopped(task_id): break
         file_name = os.path.basename(file_path)
         
-        # 临时二次压缩时，绝不读取永久资产，防幻觉缓存
         asset = None if is_temporary else get_asset(file_path)
         if asset and os.path.exists(asset["asset_path"]) and os.path.abspath(file_path) != os.path.abspath(asset["asset_path"]):
             with open(asset["asset_path"], "r", encoding="utf-8") as f:
@@ -209,7 +214,6 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
             final_feedback.append(f"🎯 命中复用：{file_name} 自动加载本地资产库，免提炼。")
             continue
         
-        # 临时二次压缩不读 checkpoint 缓存
         cached_result = None if is_temporary else get_checkpoint(file_path)
         if cached_result:
             doc_states[idx] = {"status": "CACHED", "final_text": cached_result, "file_name": file_name, "file_path": file_path}
@@ -265,7 +269,10 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
         ready_queue = ready_queue[concurrency_limit:]
         
         prompts_to_send = [item[3] for item in batch]
-        print(f"[SLM 并发调度] 正在发射 {len(prompts_to_send)} 个切片任务 (全局队列剩余: {len(ready_queue)})")
+        
+        msg = f"📦 [大规模提炼] 正在下发 {len(prompts_to_send)} 个切片任务 (全局队列剩余等待: {len(ready_queue)} 个)"
+        print(msg)
+        if task_id: update_task_progress(task_id, msg)
         
         if slm_scheduler:
             results = slm_scheduler.submit(prompts_to_send, tracker=tracker, task_id=task_id)
@@ -282,7 +289,10 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
                     current_reports = [r for r in state["map_results"] if r and r not in ["无", "None", "none", "NONE"]]
                     massive_output = _sequential_assemble(current_reports, len(state["map_results"]))
                     current_tokens = get_token_count(massive_output)
-                    print(f"✅ [{state['file_name']}] Map 阶段组装完成 -> 体积: {current_tokens} Tokens")
+                    
+                    done_msg = f"✅ [初步提炼完成] 文件 {state['file_name']} (组装体积: {current_tokens} Tokens)"
+                    print(done_msg)
+                    if task_id: update_task_progress(task_id, done_msg)
                     
                     if current_tokens > llm_safe_window:
                         state["status"] = "REDUCE_1"
@@ -306,7 +316,10 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
                     valid_reports = [r for r in state["current_reduce_results"] if len(r) > 5]
                     massive_output = _sequential_assemble(valid_reports, len(valid_reports))
                     current_tokens = get_token_count(massive_output)
-                    print(f"✅ [{state['file_name']}] Reduce {step} 组装完成 -> 体积: {current_tokens} Tokens")
+                    
+                    done_msg = f"✅ [极限压缩完成] 文件 {state['file_name']} Reduce 第{step}轮 (体积降至: {current_tokens} Tokens)"
+                    print(done_msg)
+                    if task_id: update_task_progress(task_id, done_msg)
                     
                     if enable_debug:
                         with open(os.path.join(debug_dir, f"{state['file_name']}_02_Reduce_Step{step}.md"), "w", encoding="utf-8") as f:
@@ -367,13 +380,11 @@ def delegate_to_small_models(file_paths: List[str] = None, actual_file_ids: List
                 with open(os.path.join(debug_dir, f"{file_name}_03_Final.md"), "w", encoding="utf-8") as f:
                     f.write(f"# {file_name} - 最终存入系统记忆区的内容\n\n{safe_final_output}")
             
-            # 临时跑数绝不写入持久化 checkpoints 缓存
             if not is_temporary:
                 save_checkpoint(file_path, safe_final_output)
             final_feedback.append(f"{file_name} 提炼完成。")
 
         if working_memory is not None:
-            # 🔴 如果是临时二次压缩 MAP，只在内存中更新，严禁破坏第一次 MAP_REDUCE 产出的落盘资产与溯源路径
             if is_temporary:
                 working_memory[f"Summary_{file_id}"] = safe_final_output
                 if "agent_state" in kwargs and kwargs["agent_state"]:

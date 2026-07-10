@@ -2,7 +2,8 @@
 from openai import OpenAI
 from config import get_llm_api_key, get_llm_base_url, get_llm_provider, get_llm_model, LLM_ENDPOINTS
 from utils.retry import retry_with_fallback
-from utils.token_tracker import global_token_tracker
+from utils.token_tracker import global_token_tracker, current_task_id
+from utils.task_manager import update_task_progress
 
 class LLMClient:
     def __init__(self):
@@ -55,7 +56,16 @@ class LLMClient:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = {"type": "function", "function": {"name": "system_router"}}
             
-        resp = self.client.chat.completions.create(**kwargs)
+        tid = current_task_id.get()
+        if tid and tid != "UNKNOWN_TASK":
+             print(f"📡 [LLM Client] 底层发起网络请求 -> 模型: {self.model}")
+        
+        # ✨ 在发送指令前启动计时器，并确保无论成败完美截断时间
+        global_token_tracker.start_timer("llm", tid)
+        try:
+            resp = self.client.chat.completions.create(**kwargs)
+        finally:
+            global_token_tracker.stop_timer("llm", tid)
         
         # 🌟 拦截提取 Token 消耗（兼容 OpenAI 标准格式和火山定制返回）
         if hasattr(resp, 'usage') and resp.usage:
@@ -75,7 +85,7 @@ class LLMClient:
                 details = usage_dict.get("completion_tokens_details") or usage_dict.get("output_tokens_details") or {}
                 reasoning_tok = details.get("reasoning_tokens") or 0
                 
-                global_token_tracker.add_llm(in_tok, out_tok, reasoning_tok)
+                global_token_tracker.add_llm(in_tok, out_tok, reasoning_tok, task_id=tid)
             except Exception as e:
                 print(f"⚠️ [Token Tracker] 大模型用量解析失败: {e}")
         
