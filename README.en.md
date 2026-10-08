@@ -28,11 +28,20 @@ pip install fastapi uvicorn python-multipart openai requests tavily-python
 
 > The project uses the latest version of the RWKV model by default, and prompts and parameters optimized for the 7.2B model have been configured. You don't need to change the parameters if you use a larger model. If using a smaller model, it is recommended to reduce the input length, while other parameters remain optimal.
 
-> LLM calls based on Volcengine and Baidu AI Studio are configured. The Baidu configuration comes with a built-in search engine and is set up with mandatory citations. `tavily` is configured for Volcengine. More comprehensive search engines will be added in the future.
+> LLM calls based on StepFun, Volcengine and Baidu AI Studio are configured (default: stepfun / step-5-preview). The Baidu configuration comes with a built-in search engine and is set up with mandatory citations. `tavily` is configured for Volcengine. StepFun uses its standalone search API (`POST /step_plan/v1/search`, since step-5-preview does not support the built-in search tool). More comprehensive search engines will be added in the future.
 
 ### 2. rwkv_lightning Configuration Guide
 
 This project requires calling the model started via [rwkv_lightning](https://github.com/RWKV-Vibe/rwkv_lightning). Support for the [Albatross](https://github.com/BlinkDL/Albatross) inference engine will be added later.
+
+By default this project uses the engine's **fixed high-throughput endpoint** `/high_throughput/chat/completions` (must be enabled at launch; a resident concurrency pool of 128 is recommended):
+
+```bash
+cd models/rwkv_lightning
+python app.py --model-path ../RWKV7-G1k-7.2B-20260930.pth \
+  --port 8008 --password rwkv7_7.2b \
+  --enable-high-throughput --high-throughput-max-active-states 128
+```
 
 For detailed configuration and usage tutorials, please refer to the [rwkv_lightning Batch Inference Tutorial](https://www.rwkv.cn/tutorials/intermediate/rwkv_lightning).
 
@@ -44,9 +53,10 @@ Below are the parameter descriptions found in `config.json`.
 
 | Parameter Name | Function | Options |
 | --- | --- | --- |
-| `LLM_PROVIDER` | Model provider, currently Volcengine and Baidu AI Studio are supported | `baidu` `volcengine` |
+| `LLM_PROVIDER` | Model provider; StepFun, Volcengine and Baidu AI Studio are supported | `stepfun` `baidu` `volcengine` |
 | `API_KEYS.baidu` | API_Key for Baidu AI Studio | `Any valid Key` (Optional if not used) |
 | `API_KEYS.volcengine` | API_Key for Volcengine | `Any valid Key` (Optional if not used) |
+| `API_KEYS.stepfun` | API_Key for StepFun | `Any valid Key` (Optional if not used) |
 | `API_KEYS.tavily` | API_Key for tavily search engine | `Any valid Key` |
 
 For other pre-configured modifiable parameters, please check the Appendix.

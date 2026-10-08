@@ -28,11 +28,20 @@ pip install fastapi uvicorn python-multipart openai requests tavily-python
 
 > 项目默认使用 RWKV 最新版本模型，已配置好 7.2B 适用的提示词和适用参数，使用更大模型可以不更改参数，使用更小模型建议缩小输入长度，其他参数仍是较优参数；
 
-> 配置了基于火山引擎和飞桨星河的大模型调用，其中飞桨配置的大模型调用内嵌搜索引擎，已设置强制引用，针对火山引擎配置了`tavily`，后续会增加搜索更全面的其他引擎。
+> 配置了基于阶跃星辰(StepFun)、火山引擎和飞桨星河的大模型调用（默认 stepfun / step-5-preview），其中飞桨配置的大模型调用内嵌搜索引擎，已设置强制引用，针对火山引擎配置了`tavily`；阶跃星辰使用其独立搜索 API（`POST /step_plan/v1/search`，step-5-preview 不支持内置搜索工具），后续会增加搜索更全面的其他引擎。
 
 ### rwkv_lightning 配置说明
 
 本项目需要调用 [rwkv_lightning](https://github.com/RWKV-Vibe/rwkv_lightning) 启动的模型，后续会增加[Albatross](https://github.com/BlinkDL/Albatross) 推理引擎的调用方法；
+
+本项目默认走推理引擎的**高吞吐固定端点** `/high_throughput/chat/completions`（需在启动时显式开启，常驻并发池建议开 128）：
+
+```bash
+cd models/rwkv_lightning
+python app.py --model-path ../RWKV7-G1k-7.2B-20260930.pth \
+  --port 8008 --password rwkv7_7.2b \
+  --enable-high-throughput --high-throughput-max-active-states 128
+```
 
 详细的配置和使用教程参考 [rwkv_lightning 批量推理教程](https://www.rwkv.cn/tutorials/intermediate/rwkv_lightning)
 
@@ -44,9 +53,10 @@ pip install fastapi uvicorn python-multipart openai requests tavily-python
 
 | 参数名 | 参数功能 | 可选项 |
 | :--- | :--- | :--- |
-| `LLM_PROVIDER` | 模型来源，目前可选火山引擎和飞桨星河 | `baidu` `volcengine` |
+| `LLM_PROVIDER` | 模型来源，目前可选阶跃星辰、火山引擎和飞桨星河 | `stepfun` `baidu` `volcengine` |
 | `API_KEYS.baidu` | 飞桨星河的 API_Key | `任意合法 Key`（不用可以不配置） |
 | `API_KEYS.volcengine` | 火山引擎的 API_Key | `任意合法 Key`（不用可以不配置） |
+| `API_KEYS.stepfun` | 阶跃星辰的 API_Key | `任意合法 Key`（不用可以不配置） |
 | `API_KEYS.tavily` | tavily 搜索引擎的 API_Key | `任意合法 Key` |
 
 其他已预制可修改的参数请查看附录
@@ -101,6 +111,9 @@ npm run dev
 | `LLM_ENDPOINTS.baidu.model` | 飞桨星河的模型名 | `ernie-5.1` |
 | `LLM_ENDPOINTS.baidu.max_completion_tokens` | 飞桨星河的最大输出 token 限制 | 需要小于`65536` |
 | `LLM_ENDPOINTS.baidu.enable_web_search` | 是否开启文心模型的内嵌网页搜索功能 | `true` |
+| `LLM_ENDPOINTS.stepfun.base_url` | 阶跃星辰的模型调用链接 | `https://api.stepfun.com/step_plan/v1` |
+| `LLM_ENDPOINTS.stepfun.model` | 阶跃星辰的模型名（step-5-preview 的联网检索走独立 `POST /step_plan/v1/search`） | `step-5-preview` |
+| `LLM_ENDPOINTS.stepfun.max_completion_tokens` | 阶跃星辰的最大输出 token 限制 | `65536` |
 | `SEARCH_CONFIG.search_depth` | tavily 搜索引擎的搜索级别参数 | `advanced` |
 | `SEARCH_CONFIG.max_results` | tavily 搜索引擎的最大返回网页数 | `10` |
 | `SEARCH_CONFIG.time_range` | tavily 搜索引擎的时间范围 | `year` `month` `week` `day` `none`|
@@ -128,9 +141,15 @@ npm run dev
 | `AGENT_CONFIG.max_files_per_batch` | 每轮处理的最大文件数 | `10` |
 | `AGENT_CONFIG.max_error_retries` | | `3` |
 | `AGENT_CONFIG.memory_truncate_length` | | `60000` |
-| `SLM_CONFIG.endpoint` | RWKV 的调用端点 | `"http://192.168.0.82:8080/v1/chat/completions"` |
+| `SLM_CONFIG.endpoint` | RWKV 的调用端点（默认走高吞吐固定端点） | `"http://192.168.0.82:8008/high_throughput/chat/completions"` |
 | `SLM_CONFIG.password` | RWKV 的调用密码（无密码可置空） | `"rwkv7_7.2b"` |
-| `SLM_CONFIG.concurrency` | RWKV 的最大并发数 | 整数，7.2B 时，24G 显存设置为 16G 为较优 |
+| `SLM_CONFIG.concurrency` | RWKV 的最大并发数 | 整数，7.2B 时，24G 显存设置为 128（配合 `--high-throughput-max-active-states 128`） |
+| `REPORT_CONFIG.report_writer` | 最终报告撰写引擎：大模型直写 / 小模型滚动溯源分节写 | `"llm"`（默认） `"slm"` |
+| `REPORT_CONFIG.enable_section_source_binding` | LLM 写报告时是否启用 SLM 并行滚动溯源（按节注入绑定素材，更耗 token） | `false`（默认） `true` |
+| `REPORT_CONFIG.slm_section_ref_budget_tokens` | SLM 写报告时单节参考资料 token 预算（超过则分步生成再合并） | `8000` |
+| `REPORT_CONFIG.slm_max_context_tokens` | SLM 写报告时单次总上下文上限 | `16000` |
+| `REPORT_CONFIG.slm_section_max_retries` | SLM 写报告时节/片段的复读重试上限（超限标记本节失败） | `3` |
+| `REPORT_CONFIG.slm_report_output_tokens` | SLM 写报告时单次最大输出 token | `4000` |
 | `TRACKING.enable` | 是否追踪日志 | `true` |
 | `TRACKING.enable_slm_log` | 是否追踪 RWKV 的处理日志| `false` |
 | `TRACKING.log_dir` | 日志存放路径 | `"./logs"` |

@@ -1,8 +1,9 @@
 {
-  "LLM_PROVIDER": "baidu", 
+  "LLM_PROVIDER": "stepfun",
   "API_KEYS": {
     "baidu": "key",
     "volcengine": "key",
+    "stepfun": "key",
     "tavily": "key"
   },
   "LLM_ENDPOINTS": {
@@ -16,6 +17,11 @@
       "model": "ernie-5.1",
       "max_completion_tokens": 65536,
       "enable_web_search": true
+    },
+    "stepfun": {
+      "base_url": "https://api.stepfun.com/step_plan/v1",
+      "model": "step-5-preview",
+      "max_completion_tokens": 65536
     }
   },
   "SEARCH_CONFIG": {
@@ -29,8 +35,11 @@
     "output_directory": "./data/output",
     "checkpoint_directory": "./data/checkpoints",
     "debug_directory": "./data/debug_slm",
-    "enable_debug_slm": false, 
-    "allowed_extensions": [".txt", ".md"],
+    "enable_debug_slm": false,
+    "allowed_extensions": [
+      ".txt",
+      ".md"
+    ],
     "max_chunk_tokens": 2400,
     "overlap_ratio": 0.05,
     "reduce_group_size": 4,
@@ -55,12 +64,20 @@
     "concurrency": 6
   },
   "SLM_CONFIG": {
-    "endpoint": "http://192.168.0.82:8008/v1/chat/completions",
+    "endpoint": "http://127.0.0.1:8008/high_throughput/chat/completions",
     "password": "rwkv7_7.2b",
     "concurrency": 128,
     "enable_async_parallel": false,
     "async_parallelism": 2,
     "async_batch_wait_ms": 20
+  },
+  "REPORT_CONFIG": {
+    "report_writer": "llm",
+    "enable_section_source_binding": false,
+    "slm_section_ref_budget_tokens": 8000,
+    "slm_max_context_tokens": 16000,
+    "slm_section_max_retries": 3,
+    "slm_report_output_tokens": 4000
   },
   "TRACKING": {
     "enable": true,

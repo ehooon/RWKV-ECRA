@@ -25,3 +25,5 @@ debug_slm/
 logs/
 package-lock.json
 data/output/
+data/checkpoints/
+data/knowledge_assets/

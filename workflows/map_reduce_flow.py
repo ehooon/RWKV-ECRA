@@ -26,31 +26,22 @@ def detect_is_english(text: str, threshold: float = 0.5) -> bool:
     eng_chars = len(re.findall(r'[a-zA-Z]', clean_text))
     return (eng_chars / len(clean_text)) > threshold
 
-def clean_slm_output(text: str) -> str:
-    clean_str = text.strip()
-    clean_str = re.sub(r"<think>.*?</think>", "", clean_str, flags=re.DOTALL)
-    clean_str = clean_str.replace("</think>", "").strip()
-    if "<think>" in clean_str:
-        clean_str = clean_str.split("<think>")[0].strip()
-        
-    for marker in ["User:", "Assistant:", "Q:", "A:", "Question:"]:
-        if marker in clean_str:
-            clean_str = clean_str.split(marker)[0].strip()
-            
-    lines = clean_str.split('\n')
+def detect_line_repetition(lines: List[str]) -> tuple:
+    """行级周期复读检测。返回 (是否发生复读, 清理后的行列表)。
+    命中复读时，冗余循环行已被截断并追加了系统截断标记。"""
     valid_lines = []
-    
+    is_repeating = False
+
     for line in lines:
         line_stripped = line.strip()
         if not line_stripped: continue
-        
+
         valid_lines.append(line_stripped)
-        
+
         n = len(valid_lines)
         if n >= 4:
-            is_repeating = False
             for p in range(1, (n // 2) + 1):
-                repeats = 3 if p == 1 else 2  
+                repeats = 3 if p == 1 else 2
                 if n >= p * repeats:
                     pattern = valid_lines[-p:]
                     match_all = True
@@ -60,16 +51,30 @@ def clean_slm_output(text: str) -> str:
                         if valid_lines[start_idx:end_idx] != pattern:
                             match_all = False
                             break
-                    
+
                     if match_all:
                         valid_lines = valid_lines[:-p*(repeats-1)]
                         valid_lines.append("...[系统物理防浪涌：检测到模型陷入周期性复读，后续冗余已被彻底截断]...")
                         is_repeating = True
                         break
-                        
+
             if is_repeating:
-                break 
-                
+                break
+
+    return is_repeating, valid_lines
+
+def clean_slm_output(text: str) -> str:
+    clean_str = text.strip()
+    clean_str = re.sub(r"<think>.*?</think>", "", clean_str, flags=re.DOTALL)
+    clean_str = clean_str.replace("</think>", "").strip()
+    if "<think>" in clean_str:
+        clean_str = clean_str.split("<think>")[0].strip()
+
+    for marker in ["User:", "Assistant:", "Q:", "A:", "Question:"]:
+        if marker in clean_str:
+            clean_str = clean_str.split(marker)[0].strip()
+
+    _, valid_lines = detect_line_repetition(clean_str.split('\n'))
     return "\n".join(valid_lines).strip()
 
 def _sequential_assemble(reports: List[str], chunk_count: int) -> str:

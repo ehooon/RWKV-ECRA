@@ -32,6 +32,8 @@ class AnalyzeRequest(BaseModel):
     slm_password: Optional[str] = None
     queued_at: Optional[str] = None  
     slm_async_enabled: Optional[bool] = None
+    report_writer: Optional[str] = None
+    enable_section_source_binding: Optional[bool] = None
 
 # =====================================
 # 2. 基础系统接口 (上传与清理)
@@ -168,6 +170,8 @@ def background_analyze(task_id: str, req: AnalyzeRequest, task_output_dir: str):
     if req.slm_endpoint: config.override_slm_endpoint.set(req.slm_endpoint)
     if req.slm_password is not None: config.override_slm_password.set(req.slm_password)
     if req.slm_async_enabled is not None: config.override_slm_async_enabled.set(req.slm_async_enabled)
+    if req.report_writer: config.override_report_writer.set(req.report_writer)
+    if req.enable_section_source_binding is not None: config.override_section_source_binding.set(req.enable_section_source_binding)
 
     try:
         agent = Orchestrator()
@@ -184,6 +188,8 @@ def background_analyze(task_id: str, req: AnalyzeRequest, task_output_dir: str):
         config.override_slm_endpoint.set(None)
         config.override_slm_password.set(None)
         config.override_slm_async_enabled.set(None)
+        config.override_report_writer.set(None)
+        config.override_section_source_binding.set(None)
         current_task_id.reset(token_ctx)
 
 @app.get("/frontend-api/config")
@@ -194,7 +200,11 @@ def get_frontend_config():
             "slm_async_enabled": config.get_slm_async_enabled(),
             "slm_concurrency": config.get_slm_concurrency(),
             "slm_async_parallelism": config.get_slm_async_parallelism(),
-            "llm_concurrency": config.get_llm_concurrency()
+            "llm_concurrency": config.get_llm_concurrency(),
+            "llm_provider": config.get_llm_provider(),
+            "llm_model": config.get_llm_model(),
+            "report_writer": config.get_report_writer(),
+            "enable_section_source_binding": config.get_section_source_binding_enabled()
         }
     }
 

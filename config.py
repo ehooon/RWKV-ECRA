@@ -29,6 +29,7 @@ if "asset_directory" not in DATA_PIPELINE:
 AGENT_CONFIG = _cfg.get("AGENT_CONFIG", {})
 LLM_CONFIG = _cfg.get("LLM_CONFIG", {})
 SLM_CONFIG = _cfg.get("SLM_CONFIG", {})
+REPORT_CONFIG = _cfg.get("REPORT_CONFIG", {})
 
 TRACKING = _cfg.get("TRACKING", {})
 if TRACKING.get("log_dir", "").startswith("./"):
@@ -44,6 +45,8 @@ override_llm_provider: ContextVar[str] = ContextVar("override_llm_provider", def
 override_slm_endpoint: ContextVar[str] = ContextVar("override_slm_endpoint", default=None)
 override_slm_password: ContextVar[str] = ContextVar("override_slm_password", default=None)
 override_slm_async_enabled: ContextVar[bool] = ContextVar("override_slm_async_enabled", default=None)
+override_report_writer: ContextVar[str] = ContextVar("override_report_writer", default=None)
+override_section_source_binding: ContextVar[bool] = ContextVar("override_section_source_binding", default=None)
 
 def get_llm_provider() -> str:
     return override_llm_provider.get() or DEFAULT_LLM_PROVIDER
@@ -83,3 +86,16 @@ def get_slm_async_enabled() -> bool:
 
 def get_llm_concurrency() -> int:
     return max(1, int(LLM_CONFIG.get("concurrency", 6)))
+
+def get_report_writer() -> str:
+    override_value = override_report_writer.get()
+    if override_value in ("llm", "slm"):
+        return override_value
+    writer = REPORT_CONFIG.get("report_writer", "llm")
+    return writer if writer in ("llm", "slm") else "llm"
+
+def get_section_source_binding_enabled() -> bool:
+    override_value = override_section_source_binding.get()
+    if override_value is not None:
+        return bool(override_value)
+    return bool(REPORT_CONFIG.get("enable_section_source_binding", False))

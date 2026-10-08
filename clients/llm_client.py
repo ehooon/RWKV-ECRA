@@ -52,6 +52,13 @@ class LLMClient:
             if reasoning:
                 kwargs["extra_body"] = {"reasoning_effort": reasoning}
 
+        elif self.provider == "stepfun":
+            # 阶跃星辰 OpenAI 兼容接口；step-5-preview 不支持内置 web_search 工具，
+            # 联网检索走独立的 POST /v1/search（见 tools/web_search.py）
+            max_out = provider_config.get("max_completion_tokens")
+            if max_out:
+                kwargs["max_tokens"] = max_out
+
         if tools: 
             kwargs["tools"] = tools
             kwargs["tool_choice"] = {"type": "function", "function": {"name": "system_router"}}

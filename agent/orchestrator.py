@@ -26,7 +26,7 @@ import workflows.report_flow
 
 
 class _SLMInputQueueItem:
-    def __init__(self, request_id: str, task_id: str, index: int, content: str, tracker, endpoint: str, password: str):
+    def __init__(self, request_id: str, task_id: str, index: int, content: str, tracker, endpoint: str, password: str, max_tokens: int = 2400):
         self.request_id = request_id
         self.task_id = task_id
         self.index = index
@@ -34,6 +34,7 @@ class _SLMInputQueueItem:
         self.tracker = tracker
         self.endpoint = endpoint
         self.password = password
+        self.max_tokens = max_tokens
         self.result = ""
         self.error = None
         self.done = threading.Event()
@@ -52,17 +53,17 @@ class SLMInputScheduler:
         self._worker_started = False
         self._active_batches = 0
 
-    def submit(self, contents: list[str], tracker=None, task_id: str = "") -> list[str]:
+    def submit(self, contents: list[str], tracker=None, task_id: str = "", max_tokens: int = 2400) -> list[str]:
         if not contents:
             return []
 
         if not get_slm_async_enabled():
-            return SLMClient().batch_generate(contents, tracker=tracker, task_id=task_id)
+            return SLMClient().batch_generate(contents, tracker=tracker, task_id=task_id, max_tokens=max_tokens)
 
         request_id = uuid.uuid4().hex
         client = SLMClient()
         items = [
-            _SLMInputQueueItem(request_id, task_id or "UNKNOWN_TASK", idx, content, tracker, client.endpoint, client.password)
+            _SLMInputQueueItem(request_id, task_id or "UNKNOWN_TASK", idx, content, tracker, client.endpoint, client.password, max_tokens)
             for idx, content in enumerate(contents)
         ]
 
@@ -152,7 +153,7 @@ class SLMInputScheduler:
             # 2. ✨ 开始并发计时器
             global_token_tracker.start_timer("slm", tid)
             try:
-                results = client._batch_generate_direct([item.content for item in batch], task_id=tid)
+                results = client._batch_generate_direct([item.content for item in batch], task_id=tid, max_tokens=batch[0].max_tokens)
             finally:
                 # 3. ✨ 绝对闭环终止计时器
                 global_token_tracker.stop_timer("slm", tid)

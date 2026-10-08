@@ -25,7 +25,7 @@ class SLMClient:
             return self._password_override
         return get_slm_password()
 
-    def batch_generate(self, contents: list[str], tracker=None, task_id: str = None) -> list[str]:
+    def batch_generate(self, contents: list[str], tracker=None, task_id: str = None, max_tokens: int = 2400) -> list[str]:
         if not contents:
             return []
             
@@ -36,7 +36,7 @@ class SLMClient:
         # ✨ 在发送指令前启动计时器，确保绝对闭环截断
         global_token_tracker.start_timer("slm", task_id)
         try:
-            results = self._batch_generate_direct(contents, task_id=task_id)
+            results = self._batch_generate_direct(contents, task_id=task_id, max_tokens=max_tokens)
         finally:
             global_token_tracker.stop_timer("slm", task_id)
         
@@ -49,10 +49,10 @@ class SLMClient:
                 tracker.track_slm(input_prompt=contents[idx], output_text=text, task_id=task_id)
         return results
 
-    def _batch_generate_direct(self, contents: list[str], task_id: str = None) -> list[str]:
+    def _batch_generate_direct(self, contents: list[str], task_id: str = None, max_tokens: int = 2400) -> list[str]:
         payload = {
             "contents": contents,
-            "max_tokens": 2400,       
+            "max_tokens": max_tokens,       
             "temperature": 1.0,       
             "top_k": 20,
             "top_p": 0.95,

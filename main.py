@@ -1,8 +1,11 @@
 # RWKV-ECRA/main.py
 import os
 import sys
+import uuid
+from datetime import datetime
 from agent.orchestrator import Orchestrator
 from config import DATA_PIPELINE, API_KEYS
+from utils.task_manager import record_task, is_task_stopped
 
 def setup_env():
     os.environ['BAIDU_API_KEY'] = API_KEYS.get("baidu", "")
@@ -28,9 +31,16 @@ if __name__ == "__main__":
     print(f"[系统] 接收指令: {query}\n开始执行分析任务...\n")
     
     agent = Orchestrator()
+    task_id = f"TASK_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+    task_output_dir = os.path.join(DATA_PIPELINE["output_directory"], task_id)
+    record_task(task_id, query, "running", task_output_dir)
     try:
-        response = agent.run(query)
+        response = agent.run(query, task_id=task_id)
+        if not is_task_stopped(task_id):
+            record_task(task_id, query, "completed", task_output_dir)
         print("\n" + "="*20 + " 任务完成 " + "="*20)
         print(response)
     except Exception as e:
+        if not is_task_stopped(task_id):
+            record_task(task_id, query, "failed", task_output_dir, str(e))
         print(f"\n[执行异常] 运行中止: {e}")

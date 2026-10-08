@@ -7,15 +7,54 @@ import concurrent.futures
 from typing import List, Dict
 from clients.llm_client import LLMClient
 from clients.slm_client import SLMClient
-from config import DATA_PIPELINE, get_llm_concurrency, get_slm_concurrency
+from config import (DATA_PIPELINE, REPORT_CONFIG, get_llm_concurrency, get_slm_concurrency,
+                    get_report_writer, get_section_source_binding_enabled)
 from utils.checkpoint import clear_checkpoints_for_files
 from tools.registry import ToolRegistry
 from utils.chunker import get_token_count, semantic_chunk_text
-from prompts.slm_prompts import build_slm_sequential_summary_prompt, build_slm_reduce_prompt
-from workflows.map_reduce_flow import llm_plan_execute_check_compression, clean_slm_output, _sequential_assemble
+from prompts.slm_prompts import (build_slm_sequential_summary_prompt, build_slm_reduce_prompt,
+                                 build_slm_section_binding_prompt, build_slm_section_write_prompt,
+                                 build_slm_section_merge_prompt)
+from workflows.map_reduce_flow import (llm_plan_execute_check_compression, clean_slm_output,
+                                       _sequential_assemble, detect_line_repetition, detect_is_english)
 import contextvars
 from utils.token_tracker import current_task_id
 from utils.task_manager import update_task_progress
+
+# 🧹 静态清洗:绑定关系是静态的,凡不指向合法来源的"角标形状"残留一律物理剥离
+#   ^ {[32],[18]} / $^{661be5}$ / 裸 [32][18] —— 均为模型抄录素材内部参考文献编号的产物
+_GHOST_BRACED = re.compile(r'\^?\{\[[^\}]*\}\^?')
+_GHOST_HASH = re.compile(r'\$\^\{[0-9a-zA-Z]{4,8}\}\$')
+_GHOST_BARE = re.compile(r'(?<![!\[\]\^])\[\d{1,3}(?:\]\s*\[\d{1,3})*\](?![\]\(\]\^])')
+_CODE_FENCE = re.compile(r'(```[\s\S]*?```)', re.S)
+
+def strip_ghost_citations(text: str) -> str:
+    """剥离幻觉角标;围栏代码块内的内容不处理(保护 A[0][1] 之类下标)。
+    合法角标(^{N}^ / ^[N]^)先占位保护, ghost 剥离到不动点后再还原。"""
+    if not text:
+        return text
+    legit_re = re.compile(r'\^\{\d{1,3}\}\^|\^\[\d{1,3}\]\^')
+    out = []
+    for i, seg in enumerate(_CODE_FENCE.split(text)):
+        if i % 2 == 1:
+            out.append(seg)
+            continue
+        held = []
+        def _hold(m):
+            held.append(m.group(0))
+            return f"\x00{len(held) - 1}\x00"
+        seg = legit_re.sub(_hold, seg)
+        for _ in range(4):  # 链式残留需迭代到不动点,如 ^{4}^{[32]}^{[18]}
+            new = _GHOST_BRACED.sub('', seg)
+            new = _GHOST_HASH.sub('', new)
+            new = _GHOST_BARE.sub('', new)
+            if new == seg:
+                break
+            seg = new
+        seg = re.sub(r'\x00(\d+)\x00', lambda m: held[int(m.group(1))], seg)
+        out.append(seg)
+    return ''.join(out)
+
 
 def parse_md_blocks(md_text: str) -> Dict[str, str]:
     blocks = {}
@@ -30,6 +69,359 @@ def parse_md_blocks(md_text: str) -> Dict[str, str]:
             current_content.append(line)
     if current_content: blocks[current_heading] = '\n'.join(current_content).strip()
     return blocks
+
+# ==========================================
+# SLM 滚动溯源报告生成 (report_writer = "slm")
+# ==========================================
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> str:
+    if get_token_count(text) <= max_tokens:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if get_token_count(text[:mid]) <= max_tokens:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo] + "\n...[超出本节资料预算，已截断]..."
+
+def _slm_submit(prompts, slm_scheduler=None, tracker=None, task_id=None, max_tokens=2400):
+    if not prompts:
+        return []
+    if slm_scheduler:
+        return slm_scheduler.submit(prompts, tracker=tracker, task_id=task_id, max_tokens=max_tokens)
+    return SLMClient().batch_generate(prompts, tracker=tracker, task_id=task_id, max_tokens=max_tokens)
+
+def _slm_clean_checked(raw: str) -> tuple:
+    """清洗 SLM 输出并报告是否发生周期性复读。返回 (clean_text, is_repeating)"""
+    text = (raw or "").strip()
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).replace("</think>", "").strip()
+    if "<think>" in text:
+        text = text.split("<think>")[0].strip()
+    for marker in ["User:", "Assistant:", "Q:", "A:", "Question:"]:
+        if marker in text:
+            text = text.split(marker)[0].strip()
+    is_repeating, lines = detect_line_repetition(text.split('\n'))
+    return "\n".join(lines).strip(), is_repeating
+
+def _build_source_pool(static_sources: list, source_registry: dict) -> list:
+    """把聚合素材池整理成可供 SLM 绑定的候选清单。网络块使用合成 label，并预提取其内联 WEB_REF。"""
+    pool = []
+    for i, src in enumerate(static_sources):
+        content = (src.get("content") or "").strip()
+        if not content:
+            continue
+        is_web_raw = bool(src.get("is_web_raw"))
+        if is_web_raw:
+            label = f"WEBFACT_{i}"
+            title = f"网络情报聚合块 {i+1}"
+            inline_refs = list(dict.fromkeys(re.findall(r'WEB_REF_[\w\-]+', content)))
+        else:
+            label = src["ref_ids"][0] if src.get("ref_ids") else f"UNKNOWN_SRC_{i}"
+            title = source_registry.get(label, {}).get("title", label)
+            inline_refs = [r for r in (src.get("ref_ids") or []) if r != label]
+        pool.append({
+            "label": label,
+            "ref_ids": src.get("ref_ids", []),
+            "inline_refs": inline_refs,
+            "title": title,
+            "content": content,
+            "tokens": get_token_count(content),
+            "is_web_raw": is_web_raw,
+            "main_cat": src.get("main_cat", ""),
+            "sub_cat": src.get("sub_cat", "")
+        })
+    return pool
+
+def _bind_sections_to_sources(nodes: list, source_pool: list, active_goal: str,
+                              slm_scheduler=None, tracker=None, task_id=None, tid=None) -> dict:
+    """SLM 绑定阶段：每个小节显式挑选相关素材 label，保证溯源确定性。解析失败回退为全量素材。"""
+    label_set = {s["label"] for s in source_pool}
+    candidate_lines = []
+    for s in source_pool:
+        preview = _truncate_to_tokens(s["content"], 200)
+        candidate_lines.append(f"{s['label']} | {s['title']} | {preview}")
+    candidate_str = "\n".join(candidate_lines)
+
+    prompts = [
+        build_slm_section_binding_prompt(n.get("title", "未命名章节"), active_goal, candidate_str)
+        for n in nodes
+    ]
+
+    print(f"   -> 🔗 [SLM 绑定] 正在为 {len(nodes)} 个章节并发关联参考资料...")
+    if tid and tid != "UNKNOWN_TASK":
+        update_task_progress(tid, f"🔗 [研报生成] 小模型正在为 {len(nodes)} 个章节绑定溯源参考资料...")
+
+    try:
+        raws = _slm_submit(prompts, slm_scheduler, tracker, task_id, max_tokens=800)
+    except Exception as e:
+        print(f"   ⚠️ [SLM 绑定] 批量绑定异常，全部回退为全量素材: {e}")
+        raws = [""] * len(prompts)
+
+    bindings = {}
+    for n, raw in zip(nodes, raws):
+        nid = n.get("node_id", "unknown")
+        picked = []
+        try:
+            clean, _ = _slm_clean_checked(raw)
+            m = re.search(r'\[.*?\]', clean, re.DOTALL)
+            if m:
+                arr = json.loads(m.group(0))
+                if isinstance(arr, list):
+                    picked = [str(x) for x in arr if str(x) in label_set]
+        except Exception:
+            picked = []
+
+        if not picked:
+            print(f"   ⚠️ [SLM 绑定] 节点 {nid} 未选出有效素材，回退为全量素材池。")
+            picked = [s["label"] for s in source_pool]
+        bindings[nid] = picked
+        print(f"   🔗 节点 [{nid}] 《{n.get('title', '')}》 绑定素材: {picked}")
+
+    return bindings
+
+def _execute_slm_jobs_with_retry(jobs: list, max_retries: int, output_tokens: int,
+                                 slm_scheduler=None, tracker=None, task_id=None) -> dict:
+    """并发执行 SLM 生成任务，复读/空输出自动重试，超过次数标记失败(None)。"""
+    results = {}
+    pending = list(jobs)
+    concurrency = get_slm_concurrency()
+
+    for attempt in range(max_retries):
+        if not pending:
+            break
+        prompts = [j["prompt"] for j in pending]
+        raws = []
+        for i in range(0, len(prompts), concurrency):
+            batch = prompts[i:i + concurrency]
+            try:
+                raws.extend(_slm_submit(batch, slm_scheduler, tracker, task_id, max_tokens=output_tokens))
+            except Exception as e:
+                print(f"   ❌ [SLM 研报] 批次发射异常: {e}")
+                raws.extend([""] * len(batch))
+
+        next_pending = []
+        for j, raw in zip(pending, raws):
+            clean, is_repeating = _slm_clean_checked(raw)
+            if clean and not is_repeating:
+                results[j["key"]] = clean
+            else:
+                reason = "周期性复读" if is_repeating else "空输出"
+                print(f"   ⚠️ [SLM 研报] {j['key']} 第 {attempt + 1}/{max_retries} 次生成失败({reason})")
+                next_pending.append(j)
+        pending = next_pending
+
+    for j in pending:
+        results[j["key"]] = None
+        print(f"   ❌ [SLM 研报] {j['key']} 重试 {max_retries} 次仍失败，已标记。")
+    return results
+
+def _generate_report_via_slm(nodes: list, static_sources: list, source_registry: dict,
+                             active_goal: str, skeleton_str: str, llm, beautify_sys_prompt: str,
+                             tracker=None, tid=None, task_id=None, slm_scheduler=None) -> tuple:
+    """小模型滚动溯源写报告：绑定 -> 分步并行写作 -> 合并 -> (LLM 仅排版美化)。
+    返回 (generated_results, bindings, source_pool)"""
+    ref_budget = int(REPORT_CONFIG.get("slm_section_ref_budget_tokens", 8000))
+    max_ctx = int(REPORT_CONFIG.get("slm_max_context_tokens", 16000))
+    max_retries = int(REPORT_CONFIG.get("slm_section_max_retries", 3))
+    output_tokens = int(REPORT_CONFIG.get("slm_report_output_tokens", 4000))
+
+    source_pool = _build_source_pool(static_sources, source_registry)
+    pool_by_label = {s["label"]: s for s in source_pool}
+
+    bindings = _bind_sections_to_sources(nodes, source_pool, active_goal,
+                                         slm_scheduler=slm_scheduler, tracker=tracker,
+                                         task_id=task_id, tid=tid)
+
+    # ---- 写作阶段：按节把绑定素材打包成 <= 8k 的组，超过则分步 ----
+    write_jobs = []
+    for n in nodes:
+        nid = n.get("node_id", "unknown")
+        labels = bindings.get(nid, [])
+        groups = []
+        cur, cur_t = [], 0
+        for lb in labels:
+            s = pool_by_label.get(lb)
+            if not s:
+                continue
+            # 单份素材超过 8k 预算时切片分步，绝不截断丢弃事实
+            pieces = []
+            if s["tokens"] > ref_budget:
+                for chunk in semantic_chunk_text(s["content"], max_tokens=ref_budget, overlap_ratio=0.0):
+                    pieces.append({"label": lb, "content": chunk, "is_web_raw": s["is_web_raw"],
+                                   "tokens": get_token_count(chunk)})
+            else:
+                pieces.append({"label": lb, "content": s["content"], "is_web_raw": s["is_web_raw"],
+                               "tokens": s["tokens"]})
+            for piece in pieces:
+                t = piece["tokens"]
+                if cur_t + t > ref_budget and cur:
+                    groups.append(cur)
+                    cur, cur_t = [], 0
+                cur.append(piece)
+                cur_t += t
+        if cur:
+            groups.append(cur)
+
+        if not groups:
+            n["_slm_failed"] = True
+            continue
+
+        total = len(groups)
+        is_eng = detect_is_english(active_goal + n.get("title", ""))
+        for pi, grp in enumerate(groups):
+            refs_parts = []
+            for item in grp:
+                if item["is_web_raw"]:
+                    refs_parts.append(f"[互联网检索]\n{item['content']}")
+                else:
+                    refs_parts.append(f"【资料 ^{{{item['label']}}}^】\n{item['content']}")
+            refs_text = "\n\n".join(refs_parts)
+
+            # 16k 总上下文护栏：模板+骨架+资料+输出 <= max_ctx
+            refs_cap = max_ctx - output_tokens - get_token_count(skeleton_str) - 800
+            if get_token_count(refs_text) > max(2000, refs_cap):
+                refs_text = _truncate_to_tokens(refs_text, max(2000, refs_cap))
+
+            prompt = build_slm_section_write_prompt(
+                n.get("title", "未命名章节"), nid, skeleton_str, active_goal,
+                refs_text, pi + 1, total, is_eng
+            )
+            write_jobs.append({
+                "key": f"{nid}__part{pi + 1}",
+                "node_id": nid,
+                "part_idx": pi + 1,
+                "total_parts": total,
+                "prompt": prompt
+            })
+
+    print(f"   -> ✍️ [SLM 写作] 共 {len(write_jobs)} 个分步写作任务，并发下发 (并发池: {get_slm_concurrency()})...")
+    if tid and tid != "UNKNOWN_TASK":
+        update_task_progress(tid, f"✍️ [研报生成] 小模型正在并行撰写 {len(nodes)} 个章节 (共 {len(write_jobs)} 个分步任务)...")
+
+    write_results = _execute_slm_jobs_with_retry(write_jobs, max_retries, output_tokens,
+                                                 slm_scheduler=slm_scheduler, tracker=tracker, task_id=task_id)
+
+    # ---- 合并阶段：多步产出的小节合并去重 ----
+    node_texts = {}
+    for n in nodes:
+        nid = n.get("node_id", "unknown")
+        if n.get("_slm_failed"):
+            continue
+        parts = []
+        failed = False
+        for j in write_jobs:
+            if j["node_id"] != nid:
+                continue
+            text = write_results.get(j["key"])
+            if text is None:
+                failed = True
+                break
+            parts.append((j["part_idx"], text))
+        if failed:
+            n["_slm_failed"] = True
+            continue
+        parts = [t for _, t in sorted(parts, key=lambda x: x[0])]
+        node_texts[nid] = parts
+
+    for _ in range(3):  # 合并轮数兜底，防止极长小节无限递归
+        merge_jobs = []
+        for n in nodes:
+            nid = n.get("node_id", "unknown")
+            if n.get("_slm_failed") or nid not in node_texts:
+                continue
+            parts = node_texts[nid]
+            if len(parts) <= 1:
+                continue
+            # 按 ref_budget 分组合并
+            groups, g, gt = [], [], 0
+            for p in parts:
+                t = get_token_count(p)
+                if gt + t > ref_budget and g:
+                    groups.append(g)
+                    g, gt = [], 0
+                g.append(p)
+                gt += t
+            if g:
+                groups.append(g)
+            if len(groups) <= 1:
+                parts_text = "\n\n".join([f"片段{k + 1}:\n{p}" for k, p in enumerate(parts)])
+                merge_jobs.append({
+                    "key": f"{nid}__merge",
+                    "node_id": nid,
+                    "prompt": build_slm_section_merge_prompt(n.get("title", "未命名章节"), parts_text,
+                                                             detect_is_english(parts_text))
+                })
+                node_texts[nid] = "__PENDING_SINGLE__"
+            else:
+                for gi, grp in enumerate(groups):
+                    parts_text = "\n\n".join([f"片段{k + 1}:\n{p}" for k, p in enumerate(grp)])
+                    merge_jobs.append({
+                        "key": f"{nid}__merge_g{gi}",
+                        "node_id": nid,
+                        "group_idx": gi,
+                        "prompt": build_slm_section_merge_prompt(n.get("title", "未命名章节"), parts_text,
+                                                                 detect_is_english(parts_text))
+                    })
+                node_texts[nid] = {"__groups__": len(groups)}
+
+        if not merge_jobs:
+            break
+
+        print(f"   -> 🧬 [SLM 合并] 正在合并 {len(merge_jobs)} 个多步章节片段...")
+        merge_results = _execute_slm_jobs_with_retry(merge_jobs, max_retries, output_tokens,
+                                                     slm_scheduler=slm_scheduler, tracker=tracker, task_id=task_id)
+        for n in nodes:
+            nid = n.get("node_id", "unknown")
+            if n.get("_slm_failed") or nid not in node_texts:
+                continue
+            state = node_texts[nid]
+            if state == "__PENDING_SINGLE__":
+                text = merge_results.get(f"{nid}__merge")
+                if text is None:
+                    n["_slm_failed"] = True
+                    del node_texts[nid]
+                else:
+                    node_texts[nid] = [text]
+            elif isinstance(state, dict) and "__groups__" in state:
+                new_parts = []
+                failed = False
+                for gi in range(state["__groups__"]):
+                    text = merge_results.get(f"{nid}__merge_g{gi}")
+                    if text is None:
+                        failed = True
+                        break
+                    new_parts.append(text)
+                if failed:
+                    n["_slm_failed"] = True
+                    del node_texts[nid]
+                else:
+                    node_texts[nid] = new_parts
+
+    # ---- 组装 + LLM 仅做排版美化 ----
+    generated_results = {}
+    for n in nodes:
+        nid = n.get("node_id", "unknown")
+        parts = node_texts.get(nid)
+        if n.get("_slm_failed") or not parts:
+            fail_text = "*(本节生成失败：小模型多次复读或输出异常，已跳过本节)*"
+            generated_results[nid] = {"raw": fail_text, "beautified": fail_text, "failed": True}
+            continue
+
+        raw = "\n\n".join(parts)
+        try:
+            beautified = llm.chat_completion([
+                {"role": "system", "content": beautify_sys_prompt},
+                {"role": "user", "content": raw}
+            ]).content.strip()
+            if not beautified:
+                beautified = raw
+        except Exception:
+            beautified = raw
+        generated_results[nid] = {"raw": raw, "beautified": beautified}
+
+    return generated_results, bindings, source_pool
 
 @ToolRegistry.register(
     name="batch_process_individual_reports",
@@ -384,13 +776,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
         for i, n in enumerate(nodes):
             ast_skeleton_lines.append(f"{i+1}. [节点: {n.get('node_id')}] {n.get('title')}")
         global_ast_skeleton_str = "\n".join(ast_skeleton_lines)
-        
-        # ✅ 推送正文并发撰写状态
-        if tid and tid != "UNKNOWN_TASK":
-            update_task_progress(tid, f"✍️ [研报生成 2/3] 大纲生成完毕(共{len(nodes)}节)。大模型正在并发撰写各章节正文...")
-            
-        print(f">> 2/3 正在并发与分批生成报告正文 (共 {len(nodes)} 个节点) ...")
-        
+
         writer_sys_prompt = """任务：根据大纲撰写指定节点的正文。
 
 规范：
@@ -410,9 +796,72 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 2. 全文一致性：同级标题在全文的逻辑和样式必须保持一致。
 3. 可读性优化：合理使用加粗和列表进行核心信息排版。"""
 
-        def generate_node_batch(batch_nodes):
-            batch_titles = [f"【{n.get('title')}】 (ID: {n.get('node_id')})" for n in batch_nodes]
-            node_prompt = f"""{STATIC_CONTEXT_PREFIX}
+        # ✅ 推送正文并发撰写状态
+        writer_mode = get_report_writer()
+        binding_enabled = get_section_source_binding_enabled()
+        node_bindings = None
+        pool_by_label = {}
+        generated_results = {}
+
+        if writer_mode == "slm":
+            # 🧊 小模型滚动溯源写报告：SLM 绑定资料 -> 分步并行写作 -> 合并 -> LLM 仅排版
+            if tid and tid != "UNKNOWN_TASK":
+                update_task_progress(tid, f"✍️ [研报生成 2/3] 大纲生成完毕(共{len(nodes)}节)。小模型正在绑定溯源资料并并行撰写正文...")
+
+            print(f">> 2/3 [SLM 滚动溯源模式] 正在由小模型并行生成报告正文 (共 {len(nodes)} 个节点) ...")
+            generated_results, node_bindings, source_pool = _generate_report_via_slm(
+                nodes, static_sources, source_registry, active_goal, global_ast_skeleton_str,
+                llm, beautify_sys_prompt,
+                tracker=tracker, tid=tid, task_id=tid,
+                slm_scheduler=kwargs.get("slm_scheduler")
+            )
+            pool_by_label = {s["label"]: s for s in source_pool}
+        else:
+            if binding_enabled:
+                # 可选项（默认关闭，耗 token）：LLM 撰写时也启用 SLM 并行滚动溯源绑定
+                try:
+                    source_pool = _build_source_pool(static_sources, source_registry)
+                    pool_by_label = {s["label"]: s for s in source_pool}
+                    node_bindings = _bind_sections_to_sources(
+                        nodes, source_pool, active_goal,
+                        slm_scheduler=kwargs.get("slm_scheduler"), tracker=tracker,
+                        task_id=tid, tid=tid
+                    )
+                except Exception as e:
+                    print(f"⚠️ [滚动溯源] SLM 绑定阶段失败，回退为全量素材池模式: {e}")
+                    node_bindings = None
+
+            if tid and tid != "UNKNOWN_TASK":
+                update_task_progress(tid, f"✍️ [研报生成 2/3] 大纲生成完毕(共{len(nodes)}节)。大模型正在并发撰写各章节正文...")
+
+            print(f">> 2/3 正在并发与分批生成报告正文 (共 {len(nodes)} 个节点) ...")
+
+            def generate_node_batch(batch_nodes):
+                batch_titles = [f"【{n.get('title')}】 (ID: {n.get('node_id')})" for n in batch_nodes]
+                if node_bindings:
+                    # 滚动溯源：每个节点只注入其 SLM 绑定的素材，而非全量素材池
+                    context_blocks = []
+                    for n in batch_nodes:
+                        nid = n.get("node_id", "unknown")
+                        bound = []
+                        for lb in node_bindings.get(nid, []):
+                            s = pool_by_label.get(lb)
+                            if not s:
+                                continue
+                            if s["is_web_raw"]:
+                                bound.append(f"[互联网检索]\n{s['content']}")
+                            else:
+                                bound.append(f"[本地档案 ^{{{lb}}}^]\n{s['content']}")
+                        bound_text = "\n\n".join(bound) if bound else "(本节无绑定素材)"
+                        bound_text = _truncate_to_tokens(bound_text, token_limit)
+                        context_blocks.append(
+                            f"====================\n【节点 {nid} 的绑定溯源素材】\n{bound_text}\n===================="
+                        )
+                    context_str = "\n\n".join(context_blocks) + "\n\n"
+                else:
+                    context_str = STATIC_CONTEXT_PREFIX
+
+                node_prompt = f"""{context_str}
 全局骨架树：
 {global_ast_skeleton_str}
 
@@ -423,52 +872,51 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 
 请按 XML 格式输出以上 {len(batch_nodes)} 个节点的正文："""
 
-            raw_resp = llm.chat_completion([{"role": "system", "content": writer_sys_prompt}, {"role": "user", "content": node_prompt}]).content.strip()
-            
-            data_map = {}
-            for match in re.finditer(r'<NODE id="([^"]+)">\s*(.*?)\s*</NODE>', raw_resp, re.DOTALL):
-                data_map[match.group(1)] = match.group(2).strip()
-                
-            if not data_map and len(batch_nodes) == 1:
-                data_map[batch_nodes[0]["node_id"]] = raw_resp
-                
-            result_map = {}
-            for node in batch_nodes:
-                node_id = node.get("node_id", "unknown")
-                raw_content = data_map.get(node_id, f"(节点 {node_id} 生成异常或内容丢失)")
-                
-                try:
-                    beautified = llm.chat_completion([{"role": "system", "content": beautify_sys_prompt}, {"role": "user", "content": raw_content}]).content.strip()
-                except Exception:
-                    beautified = raw_content
-                    
-                result_map[node_id] = {"raw": raw_content, "beautified": beautified}
-            
-            return result_map
+                raw_resp = llm.chat_completion([{"role": "system", "content": writer_sys_prompt}, {"role": "user", "content": node_prompt}]).content.strip()
 
-        batch_size = 2
-        batches = [nodes[i:i + batch_size] for i in range(0, len(nodes), batch_size)]
-        
-        generated_results = {}
-        max_workers = min(len(batches), get_llm_concurrency())
-        
-        print(f"   -> 已将大纲拆分为 {len(batches)} 个批次，正在由 {max_workers} 个线程同时撰写正文...")
-        
-        import contextvars
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_batch = {}
-            for b in batches:
-                ctx = contextvars.copy_context()
-                future_to_batch[executor.submit(ctx.run, generate_node_batch, b)] = b
-                
-            for future in concurrent.futures.as_completed(future_to_batch):
-                batch_ref = future_to_batch[future]
-                try:
-                    res_map = future.result()
-                    generated_results.update(res_map)
-                    print(f"   批次完成: {', '.join([n.get('title', '')[:10]+'...' for n in batch_ref])}")
-                except Exception as e:
-                    print(f"   批次失败: {e}")
+                data_map = {}
+                for match in re.finditer(r'<NODE id="([^"]+)">\s*(.*?)\s*</NODE>', raw_resp, re.DOTALL):
+                    data_map[match.group(1)] = match.group(2).strip()
+
+                if not data_map and len(batch_nodes) == 1:
+                    data_map[batch_nodes[0]["node_id"]] = raw_resp
+
+                result_map = {}
+                for node in batch_nodes:
+                    node_id = node.get("node_id", "unknown")
+                    raw_content = data_map.get(node_id, f"(节点 {node_id} 生成异常或内容丢失)")
+
+                    try:
+                        beautified = llm.chat_completion([{"role": "system", "content": beautify_sys_prompt}, {"role": "user", "content": raw_content}]).content.strip()
+                    except Exception:
+                        beautified = raw_content
+
+                    result_map[node_id] = {"raw": raw_content, "beautified": beautified}
+
+                return result_map
+
+            batch_size = 2
+            batches = [nodes[i:i + batch_size] for i in range(0, len(nodes), batch_size)]
+
+            max_workers = min(len(batches), get_llm_concurrency())
+
+            print(f"   -> 已将大纲拆分为 {len(batches)} 个批次，正在由 {max_workers} 个线程同时撰写正文...")
+
+            import contextvars
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_batch = {}
+                for b in batches:
+                    ctx = contextvars.copy_context()
+                    future_to_batch[executor.submit(ctx.run, generate_node_batch, b)] = b
+
+                for future in concurrent.futures.as_completed(future_to_batch):
+                    batch_ref = future_to_batch[future]
+                    try:
+                        res_map = future.result()
+                        generated_results.update(res_map)
+                        print(f"   批次完成: {', '.join([n.get('title', '')[:10]+'...' for n in batch_ref])}")
+                    except Exception as e:
+                        print(f"   批次失败: {e}")
 
         # ✅ 推送排版溯源状态
         if tid and tid != "UNKNOWN_TASK":
@@ -494,38 +942,56 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
             
             node_sources = []
             node_indices = []
-            
-            def map_and_replace_citation(match, is_web):
-                ref_id = match.group(1)
+
+            def register_citation(ref_id):
                 if ref_id not in source_registry:
-                    return "" 
-                    
+                    return None
+
                 src_meta = source_registry[ref_id]
-                matched_title = src_meta["title"]
-                matched_url = src_meta["url"]
-                source_type = src_meta["type"]
-                
                 if ref_id not in global_citation_map:
                     idx = citation_counter[0]
                     global_citation_map[ref_id] = idx
                     global_citation_list.append({
                         "index": idx,
-                        "title": matched_title,
-                        "url": matched_url,
-                        "type": source_type
+                        "title": src_meta["title"],
+                        "url": src_meta["url"],
+                        "type": src_meta["type"]
                     })
                     citation_counter[0] += 1
-                    
+
                 idx = global_citation_map[ref_id]
                 if idx not in node_indices:
                     node_indices.append(idx)
                     node_sources.append({
                         "index": idx,
-                        "title": matched_title,
-                        "url": matched_url,
-                        "type": source_type
+                        "title": src_meta["title"],
+                        "url": src_meta["url"],
+                        "type": src_meta["type"]
                     })
-                
+                return idx
+
+            # 🔗 SLM 绑定溯源：绑定清单优先注册入册，保证章节↔来源映射绝对稳定
+            bound_ref_set = None
+            if node_bindings:
+                bound_ref_set = set()
+                for lb in node_bindings.get(node_id, []):
+                    if lb in source_registry:
+                        bound_ref_set.add(lb)
+                    pool_entry = pool_by_label.get(lb)
+                    if pool_entry:
+                        bound_ref_set.update(pool_entry.get("inline_refs", []))
+                        bound_ref_set.update(r for r in pool_entry.get("ref_ids", []) if r != lb)
+                for ref_id in bound_ref_set:
+                    register_citation(ref_id)
+
+            def map_and_replace_citation(match, is_web):
+                ref_id = match.group(1)
+                # 绑定模式下，凡不在本节绑定集合内的角标一律视为幻觉，物理剥离
+                if bound_ref_set is not None and ref_id not in bound_ref_set:
+                    return ""
+                idx = register_citation(ref_id)
+                if idx is None:
+                    return ""
                 return f"^[{idx}]^" if is_web else f"^{{{idx}}}^"
 
             beautified_mapped = re.sub(
@@ -538,10 +1004,14 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                 lambda m: map_and_replace_citation(m, False), 
                 beautified_mapped
             )
+
+            # 🧹 静态清洗:绑定关系是静态的,凡不指向合法来源的"角标形状"残留一律物理剥离
+            beautified_mapped = strip_ghost_citations(beautified_mapped)
             
             node["raw_content"] = raw_content
             node["beautified_content"] = beautified_mapped
             node["matched_sources"] = sorted(node_sources, key=lambda x: x["index"])
+            node["failed"] = bool(node_data.get("failed", False))
             
             final_raw_parts.append(f"## {node_title}\n\n{raw_content}\n")
             final_beautified_parts.append(f"## {node_title}\n\n{beautified_mapped}\n")
@@ -592,7 +1062,8 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                     "node_id": node.get("node_id", "unknown"),
                     "title": node.get("title", "unknown"),
                     "content": node.get("beautified_content", ""),
-                    "sources": node.get("matched_sources", []) 
+                    "sources": node.get("matched_sources", []),
+                    "failed": node.get("failed", False)
                 }, ensure_ascii=False) + "\n")
                 
             f.write(json.dumps({

@@ -16,8 +16,10 @@ import {
   Folder,
   FolderOpen,
   Gauge,
+  Link2,
   Loader2,
   ListPlus,
+  PenLine,
   Play,
   RefreshCw,
   SearchCheck,
@@ -889,7 +891,7 @@ function ReportSurface({ report, surfaceRef, scrollAffordance }) {
   );
 }
 
-function LandingState({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled, onAsyncEnabledChange, onOpenFiles }) {
+function LandingState({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled, onAsyncEnabledChange, onOpenFiles, reportWriter, onReportWriterChange, sectionBinding, onSectionBindingChange, llmProviderLabel }) {
   return (
     <div className="flex min-h-[calc(100vh-12rem)] items-start justify-center pt-[10vh]">
       <section className="w-full max-w-3xl">
@@ -899,7 +901,7 @@ function LandingState({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled, onAs
         </header>
         <Composer variant="create" onSubmit={onSubmit} isAnyRunning={isAnyRunning} isSubmitting={isSubmitting} asyncEnabled={asyncEnabled} onOpenFiles={onOpenFiles} />
         <div className="mt-4 flex items-center justify-between border-t border-border pt-4 text-xs text-muted-foreground">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <button type="button" onClick={onOpenFiles} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors hover:bg-muted hover:text-foreground">
               <FolderOpen className="size-3.5" /> 文件目录
             </button>
@@ -908,6 +910,17 @@ function LandingState({ onSubmit, isAnyRunning, isSubmitting, asyncEnabled, onAs
               <span>{asyncEnabled ? "并行模式" : "顺序模式"}</span>
               <Switch checked={asyncEnabled} onCheckedChange={onAsyncEnabledChange} aria-label="切换异步并行" className="scale-[0.8]" />
             </label>
+            <label className="inline-flex cursor-pointer items-center gap-1.5">
+              <PenLine className="size-3.5" />
+              <span>{reportWriter === "slm" ? "小模型写报告" : "大模型写报告"}</span>
+              <Switch checked={reportWriter === "slm"} onCheckedChange={(v) => onReportWriterChange(v ? "slm" : "llm")} aria-label="切换报告引擎" className="scale-[0.8]" />
+            </label>
+            <label className={cn("inline-flex items-center gap-1.5", reportWriter === "slm" ? "opacity-40" : "cursor-pointer")} title={reportWriter === "slm" ? "小模型写报告时滚动溯源始终开启" : "LLM 写报告时按节注入绑定素材（更耗 Token）"}>
+              <Link2 className="size-3.5" />
+              <span>滚动溯源</span>
+              <Switch checked={reportWriter === "slm" ? true : sectionBinding} disabled={reportWriter === "slm"} onCheckedChange={onSectionBindingChange} aria-label="切换滚动溯源" className="scale-[0.8]" />
+            </label>
+            {llmProviderLabel && <span className="text-muted-foreground/70">大模型: {llmProviderLabel}</span>}
           </div>
           <span>Enter 开始 · Shift + Enter 换行</span>
         </div>
@@ -944,6 +957,24 @@ export function App() {
     } catch {}
     return false;
   });
+
+  const [reportWriter, setReportWriter] = useState(() => {
+    try {
+      const saved = localStorage.getItem("rwkv_report_writer");
+      if (saved === "slm" || saved === "llm") return saved;
+    } catch {}
+    return "llm";
+  });
+
+  const [sectionBinding, setSectionBinding] = useState(() => {
+    try {
+      const saved = localStorage.getItem("rwkv_section_binding");
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return false;
+  });
+
+  const [llmProviderLabel, setLlmProviderLabel] = useState("");
 
   const [taskQueue, setTaskQueue] = useState(() => {
     try {
@@ -1015,6 +1046,14 @@ export function App() {
   }, [asyncEnabled]);
 
   useEffect(() => {
+    localStorage.setItem("rwkv_report_writer", reportWriter);
+  }, [reportWriter]);
+
+  useEffect(() => {
+    localStorage.setItem("rwkv_section_binding", JSON.stringify(sectionBinding));
+  }, [sectionBinding]);
+
+  useEffect(() => {
     async function loadRuntimeConfig() {
       try {
         const config = await getRuntimeConfig();
@@ -1022,6 +1061,15 @@ export function App() {
         if (saved === null && typeof config.slm_async_enabled === "boolean") {
           asyncPreferenceLoadedRef.current = true;
           setAsyncEnabled(config.slm_async_enabled);
+        }
+        if (localStorage.getItem("rwkv_report_writer") === null && (config.report_writer === "slm" || config.report_writer === "llm")) {
+          setReportWriter(config.report_writer);
+        }
+        if (localStorage.getItem("rwkv_section_binding") === null && typeof config.enable_section_source_binding === "boolean") {
+          setSectionBinding(config.enable_section_source_binding);
+        }
+        if (config.llm_provider) {
+          setLlmProviderLabel(config.llm_model ? `${config.llm_provider} / ${config.llm_model}` : config.llm_provider);
         }
       } catch {}
     }
@@ -1117,7 +1165,13 @@ export function App() {
   async function executeTask(taskObj) {
     setIsSubmitting(true);
     try {
-      const response = await startAnalyze({ query: taskObj.query, queued_at: taskObj.queuedAt, slm_async_enabled: asyncEnabled });
+      const response = await startAnalyze({
+        query: taskObj.query,
+        queued_at: taskObj.queuedAt,
+        slm_async_enabled: asyncEnabled,
+        report_writer: reportWriter,
+        enable_section_source_binding: reportWriter === "slm" ? true : sectionBinding
+      });
       toast.success("任务已提交");
       await handleNewTaskSubmitted(response.task_id);
     } catch (error) {
@@ -1175,6 +1229,14 @@ export function App() {
     setAsyncEnabled(value);
   }
 
+  function handleReportWriterChange(value) {
+    setReportWriter(value);
+  }
+
+  function handleSectionBindingChange(value) {
+    setSectionBinding(value);
+  }
+
   const currentTitle = activeId ? getTaskLabel(activeTaskItem) : "准备新的研究任务";
 
   return (
@@ -1204,7 +1266,7 @@ export function App() {
 
               {taskQueue.length > 0 && <QueuePanel taskQueue={taskQueue} isQueueOpen={isQueueOpen} onToggle={() => setIsQueueOpen((value) => !value)} onClear={() => setTaskQueue([])} onRemove={(index) => setTaskQueue((current) => current.filter((_, itemIndex) => itemIndex !== index))} />}
 
-              {!activeId && <LandingState onSubmit={handleQuerySubmit} isAnyRunning={isAnyRunning} isSubmitting={isSubmitting} asyncEnabled={asyncEnabled} onAsyncEnabledChange={handleAsyncEnabledChange} onOpenFiles={() => setFileManagerOpen(true)} />}
+              {!activeId && <LandingState onSubmit={handleQuerySubmit} isAnyRunning={isAnyRunning} isSubmitting={isSubmitting} asyncEnabled={asyncEnabled} onAsyncEnabledChange={handleAsyncEnabledChange} onOpenFiles={() => setFileManagerOpen(true)} reportWriter={reportWriter} onReportWriterChange={handleReportWriterChange} sectionBinding={sectionBinding} onSectionBindingChange={handleSectionBindingChange} llmProviderLabel={llmProviderLabel} />}
 
               {/* ✨ 核心渲染区：集成度更高、直接位于研报正上方 */}
               {activeId && activeTaskItem && (
