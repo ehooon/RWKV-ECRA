@@ -45,6 +45,8 @@ python app.py --model-path ../RWKV7-G1k-7.2B-20260930.pth \
 
 For detailed configuration and usage tutorials, please refer to the [rwkv_lightning Batch Inference Tutorial](https://www.rwkv.cn/tutorials/intermediate/rwkv_lightning).
 
+> On machines without a GPU (laptops, CI, etc.), you can use the built-in `slm_stepfun_adapter.py` to emulate this endpoint: it serves the exact same high-throughput batch protocol on local port 8008, forwarding requests to a StepFun small model (step-3.5-flash). Just configure `API_KEYS.stepfun` and run `python slm_stepfun_adapter.py`; the main program needs no changes. This is intended for functional verification only — use real on-device RWKV inference in production.
+
 ### 3. Parameter Configuration Guide
 
 Below are the parameter descriptions found in `config.json`.
@@ -74,6 +76,8 @@ After starting, you can enter commands in the terminal, for example:
 Help me look into the dynamics of RWKV-based research, and see if there is anything currently not directly related to RWKV, but might support RWKV research or be supported by RWKV in the future. Be sure not to only look at local files, but also perform a web search.
 
 ```
+
+> Artifact check: run `python check_artifacts.py` to objectively inspect the reports under `data/output` (file integrity, citation-index closure, truncation detection, hallucinated citation residue, etc.) — useful for regression checks after changes.
 
 ### 5. GUI Startup
 
@@ -117,6 +121,9 @@ Once started, the frontend runs at `http://127.0.0.1:5177` by default.
 | `LLM_ENDPOINTS.baidu.model` | Baidu AI Studio model name | `ernie-5.1` |
 | `LLM_ENDPOINTS.baidu.max_completion_tokens` | Baidu maximum output token limit | Must be less than `65536` |
 | `LLM_ENDPOINTS.baidu.enable_web_search` | Whether to enable the built-in web search for the Ernie model | `true` |
+| `LLM_ENDPOINTS.stepfun.base_url` | StepFun model API base URL | `https://api.stepfun.com/step_plan/v1` |
+| `LLM_ENDPOINTS.stepfun.model` | StepFun model name (web search for step-5-preview goes through the standalone `POST /step_plan/v1/search`) | `step-5-preview` |
+| `LLM_ENDPOINTS.stepfun.max_completion_tokens` | StepFun maximum output token limit | `65536` |
 | `SEARCH_CONFIG.search_depth` | Tavily search depth parameter | `advanced` |
 | `SEARCH_CONFIG.max_results` | Tavily maximum returned web pages | `10` |
 | `SEARCH_CONFIG.time_range` | Tavily search time range | `year` `month` `week` `day` `none` |
@@ -144,9 +151,15 @@ Once started, the frontend runs at `http://127.0.0.1:5177` by default.
 | `AGENT_CONFIG.max_files_per_batch` | Maximum files processed per round | `10` |
 | `AGENT_CONFIG.max_error_retries` | Maximum error retries | `3` |
 | `AGENT_CONFIG.memory_truncate_length` | Memory truncation length | `60000` |
-| `SLM_CONFIG.endpoint` | RWKV API endpoint | `"http://192.168.0.82:8080/v1/chat/completions"` |
+| `SLM_CONFIG.endpoint` | RWKV API endpoint (uses the fixed high-throughput endpoint by default) | `"http://127.0.0.1:8008/high_throughput/chat/completions"` |
 | `SLM_CONFIG.password` | RWKV API password (leave empty if none) | `"rwkv7_7.2b"` |
-| `SLM_CONFIG.concurrency` | RWKV maximum concurrency | Integer. For the 7.2B model with 24GB VRAM, setting this to 16GB is optimal. |
+| `SLM_CONFIG.concurrency` | RWKV maximum concurrency | Integer. For the 7.2B model with 24GB VRAM, set to 128 (together with `--high-throughput-max-active-states 128`) |
+| `REPORT_CONFIG.report_writer` | Report writing engine: LLM direct writing / SLM rolling-trace section writing | `"llm"` (default) `"slm"` |
+| `REPORT_CONFIG.enable_section_source_binding` | Whether to enable SLM parallel rolling source-binding when the LLM writes the report (injects bound materials per section, costs more tokens) | `false` (default) `true` |
+| `REPORT_CONFIG.slm_section_ref_budget_tokens` | Per-section reference token budget for SLM writing (exceeding it triggers stepped generation then merge) | `8000` |
+| `REPORT_CONFIG.slm_max_context_tokens` | Total context limit per SLM writing call | `16000` |
+| `REPORT_CONFIG.slm_section_max_retries` | Retry limit per section/fragment on repetition (marks the section as failed beyond this) | `3` |
+| `REPORT_CONFIG.slm_report_output_tokens` | Maximum output tokens per SLM writing call | `4000` |
 | `TRACKING.enable` | Whether to enable log tracking | `true` |
 | `TRACKING.enable_slm_log` | Whether to track RWKV processing logs | `false` |
 | `TRACKING.log_dir` | Directory path to store logs | `"./logs"` |

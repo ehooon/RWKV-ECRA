@@ -45,6 +45,8 @@ python app.py --model-path ../RWKV7-G1k-7.2B-20260930.pth \
 
 详细的配置和使用教程参考 [rwkv_lightning 批量推理教程](https://www.rwkv.cn/tutorials/intermediate/rwkv_lightning)
 
+> 没有 GPU 的环境（轻薄本、CI 等）可以用内置的 `slm_stepfun_adapter.py` 模拟该端点：它在本机 8008 端口提供完全一致的高吞吐批量协议，把请求转发给阶跃星辰小模型（step-3.5-flash）。配置好 `API_KEYS.stepfun` 后运行 `python slm_stepfun_adapter.py` 即可，主程序无需任何改动。仅建议用于功能验证，正式使用仍以真实 RWKV 端侧推理为准。
+
 ### 3. 参数配置说明
 
 此处为 config.json 中的参数说明
@@ -72,6 +74,8 @@ python main.py
 ```
 帮我看看基于RWKV的研究的动态，并看看有什么目前和RWKV无直接关系，但是有可能后续能支持RWKV研究或被RWKV支撑进行研究的，注意不要只看本地的文件，还要搜一下
 ```
+
+> 产物校验：运行 `python check_artifacts.py` 可对 `data/output` 下的报告做客观体检（文件完整性、角标与索引闭环、截断检测、幻觉角标残留等），适合改动后的回归验证。
 
 ### 5. 可视化启动
 
@@ -141,7 +145,7 @@ npm run dev
 | `AGENT_CONFIG.max_files_per_batch` | 每轮处理的最大文件数 | `10` |
 | `AGENT_CONFIG.max_error_retries` | | `3` |
 | `AGENT_CONFIG.memory_truncate_length` | | `60000` |
-| `SLM_CONFIG.endpoint` | RWKV 的调用端点（默认走高吞吐固定端点） | `"http://192.168.0.82:8008/high_throughput/chat/completions"` |
+| `SLM_CONFIG.endpoint` | RWKV 的调用端点（默认走高吞吐固定端点） | `"http://127.0.0.1:8008/high_throughput/chat/completions"` |
 | `SLM_CONFIG.password` | RWKV 的调用密码（无密码可置空） | `"rwkv7_7.2b"` |
 | `SLM_CONFIG.concurrency` | RWKV 的最大并发数 | 整数，7.2B 时，24G 显存设置为 128（配合 `--high-throughput-max-active-states 128`） |
 | `REPORT_CONFIG.report_writer` | 最终报告撰写引擎：大模型直写 / 小模型滚动溯源分节写 | `"llm"`（默认） `"slm"` |
