@@ -40,6 +40,9 @@ if __name__ == "__main__":
             record_task(task_id, query, "completed", task_output_dir)
         print("\n" + "="*20 + " 任务完成 " + "="*20)
         print(response)
+    except KeyboardInterrupt:
+        record_task(task_id, query, "stopped", task_output_dir)
+        print("\n[已停止] 用户中断，任务已标记为 stopped。")
     except Exception as e:
         if not is_task_stopped(task_id):
             record_task(task_id, query, "failed", task_output_dir, str(e))
