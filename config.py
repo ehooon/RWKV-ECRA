@@ -99,3 +99,9 @@ def get_section_source_binding_enabled() -> bool:
     if override_value is not None:
         return bool(override_value)
     return bool(REPORT_CONFIG.get("enable_section_source_binding", False))
+
+def get_rolling_context_enabled() -> bool:
+    return bool(REPORT_CONFIG.get("enable_rolling_context", False))
+
+def get_rolling_context_budget() -> int:
+    return int(REPORT_CONFIG.get("rolling_context_budget_tokens", 2000))

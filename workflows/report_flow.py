@@ -8,7 +8,8 @@ from typing import List, Dict
 from clients.llm_client import LLMClient
 from clients.slm_client import SLMClient
 from config import (DATA_PIPELINE, REPORT_CONFIG, get_llm_concurrency, get_slm_concurrency,
-                    get_report_writer, get_section_source_binding_enabled)
+                    get_report_writer, get_section_source_binding_enabled,
+                    get_rolling_context_enabled, get_rolling_context_budget)
 from utils.checkpoint import clear_checkpoints_for_files
 from tools.registry import ToolRegistry
 from utils.chunker import get_token_count, semantic_chunk_text
@@ -85,6 +86,20 @@ def _truncate_to_tokens(text: str, max_tokens: int) -> str:
         else:
             hi = mid - 1
     return text[:lo] + "\n...[超出本节资料预算，已截断]..."
+
+def _build_section_digest(title: str, content: str, max_tokens: int = 1000) -> str:
+    """抽取式章节摘要：各级小标题 + 每段首句，零额外 LLM 调用"""
+    points = [h for h in re.findall(r'^#{2,4}\s+(.+)$', content, flags=re.M) if h.strip() != title]
+    for para in content.split('\n'):
+        para = para.strip().lstrip('-*').strip()
+        if not para or para.startswith('#'):
+            continue
+        m = re.match(r'^([^。；;\n]{4,80}[。；;])', para)
+        if m:
+            points.append(m.group(1))
+    if not points:
+        return title
+    return _truncate_to_tokens(f"{title}：" + "；".join(points), max_tokens)
 
 def _slm_submit(prompts, slm_scheduler=None, tracker=None, task_id=None, max_tokens=2400):
     if not prompts:
@@ -789,6 +804,13 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 正文内容...
 </NODE>"""
 
+        rolling_enabled = get_rolling_context_enabled()
+        if rolling_enabled:
+            writer_sys_prompt = writer_sys_prompt.replace(
+                "示例：",
+                "4. 滚动续写：承接已完成章节的逻辑终点，围绕本节主题充分展开，给出详细完整的事实、数据与论据。\n\n示例："
+            )
+
         beautify_sys_prompt = """任务：对输入的 Markdown 进行格式美化。禁止修改任何事实内容，绝对不可删除或修改原始文本中的引用角标。
 
 规范：
@@ -836,7 +858,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 
             print(f">> 2/3 正在并发与分批生成报告正文 (共 {len(nodes)} 个节点) ...")
 
-            def generate_node_batch(batch_nodes):
+            def generate_node_batch(batch_nodes, rolling_str=""):
                 batch_titles = [f"【{n.get('title')}】 (ID: {n.get('node_id')})" for n in batch_nodes]
                 if node_bindings:
                     # 滚动溯源：每个节点只注入其 SLM 绑定的素材，而非全量素材池
@@ -862,7 +884,7 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
                     context_str = STATIC_CONTEXT_PREFIX
 
                 node_prompt = f"""{context_str}
-全局骨架树：
+{rolling_str}全局骨架树：
 {global_ast_skeleton_str}
 
 当前执行批次节点：
@@ -895,28 +917,59 @@ def generate_final_aggregate_reports(working_memory: dict = None, tracker=None, 
 
                 return result_map
 
-            batch_size = 2
-            batches = [nodes[i:i + batch_size] for i in range(0, len(nodes), batch_size)]
-
-            max_workers = min(len(batches), get_llm_concurrency())
-
-            print(f"   -> 已将大纲拆分为 {len(batches)} 个批次，正在由 {max_workers} 个线程同时撰写正文...")
-
-            import contextvars
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_batch = {}
-                for b in batches:
-                    ctx = contextvars.copy_context()
-                    future_to_batch[executor.submit(ctx.run, generate_node_batch, b)] = b
-
-                for future in concurrent.futures.as_completed(future_to_batch):
-                    batch_ref = future_to_batch[future]
+            if rolling_enabled:
+                # 滚动生成：逐节串行撰写，节间注入已完成章节摘要
+                rolling_budget = get_rolling_context_budget()
+                print(f"   -> 滚动生成模式：逐节串行撰写，节间注入已完成章节摘要 (预算 {rolling_budget} Tokens)...")
+                rolling_parts = []
+                for n in nodes:
+                    nid = n.get("node_id", "unknown")
+                    rolling_str = ""
+                    if rolling_parts:
+                        rolling_str = "【已完成章节内容】\n" + "\n".join(rolling_parts) + "\n\n"
                     try:
-                        res_map = future.result()
+                        res_map = generate_node_batch([n], rolling_str)
                         generated_results.update(res_map)
-                        print(f"   批次完成: {', '.join([n.get('title', '')[:10]+'...' for n in batch_ref])}")
+                        print(f"   节点完成: {n.get('title', '')[:10]}...")
                     except Exception as e:
-                        print(f"   批次失败: {e}")
+                        print(f"   节点失败: {e}")
+                    content = generated_results.get(nid, {}).get("beautified", "")
+                    if content:
+                        rolling_parts.append(_build_section_digest(n.get("title", "未命名章节"), content))
+                    else:
+                        rolling_parts.append(f"{n.get('title', '未命名章节')}：(本节生成失败)")
+                    while len(rolling_parts) > 1 and sum(get_token_count(p) for p in rolling_parts) > rolling_budget:
+                        # 超出预算时按从新到旧的逆序之外、由旧到新把摘要压缩到只剩标题
+                        progressed = False
+                        for i in range(len(rolling_parts) - 1):
+                            if "：" in rolling_parts[i]:
+                                rolling_parts[i] = rolling_parts[i].split("：", 1)[0]
+                                progressed = True
+                        if not progressed:
+                            break
+            else:
+                batch_size = 2
+                batches = [nodes[i:i + batch_size] for i in range(0, len(nodes), batch_size)]
+
+                max_workers = min(len(batches), get_llm_concurrency())
+
+                print(f"   -> 已将大纲拆分为 {len(batches)} 个批次，正在由 {max_workers} 个线程同时撰写正文...")
+
+                import contextvars
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_batch = {}
+                    for b in batches:
+                        ctx = contextvars.copy_context()
+                        future_to_batch[executor.submit(ctx.run, generate_node_batch, b)] = b
+
+                    for future in concurrent.futures.as_completed(future_to_batch):
+                        batch_ref = future_to_batch[future]
+                        try:
+                            res_map = future.result()
+                            generated_results.update(res_map)
+                            print(f"   批次完成: {', '.join([n.get('title', '')[:10]+'...' for n in batch_ref])}")
+                        except Exception as e:
+                            print(f"   批次失败: {e}")
 
         # ✅ 推送排版溯源状态
         if tid and tid != "UNKNOWN_TASK":

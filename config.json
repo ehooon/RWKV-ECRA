@@ -74,6 +74,8 @@
   "REPORT_CONFIG": {
     "report_writer": "llm",
     "enable_section_source_binding": false,
+    "enable_rolling_context": false,
+    "rolling_context_budget_tokens": 4000,
     "slm_section_ref_budget_tokens": 8000,
     "slm_max_context_tokens": 16000,
     "slm_section_max_retries": 3,

@@ -156,6 +156,8 @@ Once started, the frontend runs at `http://127.0.0.1:5177` by default.
 | `SLM_CONFIG.concurrency` | RWKV maximum concurrency | Integer. For the 7.2B model with 24GB VRAM, set to 128 (together with `--high-throughput-max-active-states 128`) |
 | `REPORT_CONFIG.report_writer` | Report writing engine: LLM direct writing / SLM rolling-trace section writing | `"llm"` (default) `"slm"` |
 | `REPORT_CONFIG.enable_section_source_binding` | Whether to enable SLM parallel rolling source-binding when the LLM writes the report (injects bound materials per section, costs more tokens) | `false` (default) `true` |
+| `REPORT_CONFIG.enable_rolling_context` | LLM writes sections sequentially with digests of completed sections injected (more coherent and fuller, but slower) | `false` (default) `true` |
+| `REPORT_CONFIG.rolling_context_budget_tokens` | Total token budget for rolling digests (oldest digests are compressed to titles first when exceeded) | `4000` |
 | `REPORT_CONFIG.slm_section_ref_budget_tokens` | Per-section reference token budget for SLM writing (exceeding it triggers stepped generation then merge) | `8000` |
 | `REPORT_CONFIG.slm_max_context_tokens` | Total context limit per SLM writing call | `16000` |
 | `REPORT_CONFIG.slm_section_max_retries` | Retry limit per section/fragment on repetition (marks the section as failed beyond this) | `3` |

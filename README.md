@@ -150,6 +150,8 @@ npm run dev
 | `SLM_CONFIG.concurrency` | RWKV 的最大并发数 | 整数，7.2B 时，24G 显存设置为 128（配合 `--high-throughput-max-active-states 128`） |
 | `REPORT_CONFIG.report_writer` | 最终报告撰写引擎：大模型直写 / 小模型滚动溯源分节写 | `"llm"`（默认） `"slm"` |
 | `REPORT_CONFIG.enable_section_source_binding` | LLM 写报告时是否启用 SLM 并行滚动溯源（按节注入绑定素材，更耗 token） | `false`（默认） `true` |
+| `REPORT_CONFIG.enable_rolling_context` | LLM 写报告时逐节串行滚动生成，节间注入已完成章节摘要（章节连贯、篇幅更足，耗时增加） | `false`（默认） `true` |
+| `REPORT_CONFIG.rolling_context_budget_tokens` | 滚动上下文的摘要总 token 预算（超出后最老摘要压缩到只剩标题） | `4000` |
 | `REPORT_CONFIG.slm_section_ref_budget_tokens` | SLM 写报告时单节参考资料 token 预算（超过则分步生成再合并） | `8000` |
 | `REPORT_CONFIG.slm_max_context_tokens` | SLM 写报告时单次总上下文上限 | `16000` |
 | `REPORT_CONFIG.slm_section_max_retries` | SLM 写报告时节/片段的复读重试上限（超限标记本节失败） | `3` |
